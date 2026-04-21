@@ -1,0 +1,9 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# model cache
+/tmp/ov_cache*/
+
+# environment files
+.env
