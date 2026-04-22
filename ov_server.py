@@ -388,7 +388,10 @@ async def health():
 @app.get("/v1/models")
 async def list_models():
     all_ids = list(AVAILABLE_MODELS.keys()) + [EMBEDDING_MODEL_ID]
-    return {"object": "list", "data": [{"id": mid, "object": "model"} for mid in all_ids]}
+    return {"object": "list", "data": [
+        {"id": mid, "object": "model", "capabilities": {"function_calling": True}}
+        for mid in all_ids
+    ]}
 
 
 @app.post("/v1/chat/completions")
@@ -408,6 +411,8 @@ async def chat(req: ChatRequest):
     tokenizer = loaded_tokenizers[model_id]
 
     prompt = build_prompt(req.messages, tokenizer, tools=req.tools, thinking=effective_thinking)
+    if debug_logging:
+        log.info(f"[DEBUG] Rendered prompt ({model_id}, agent={is_agent}):\n{prompt[:3000]}")
 
     gen_config = ov_genai.GenerationConfig()
     gen_config.max_new_tokens = MAX_NEW_TOKENS_AGENT if is_agent else req.max_tokens
@@ -459,6 +464,7 @@ async def chat(req: ChatRequest):
                     yield f"data: {json.dumps(chunk)}\n\n"
             finally:
                 await gen_task
+                stats.busy = False
                 elapsed = time.time() - start
                 tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
                 log.info(f"{model_id} [stream]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
@@ -468,7 +474,6 @@ async def chat(req: ChatRequest):
                 stats.last_tok_per_sec = tok_per_sec
                 stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
                 stats.total_tokens    += completion_tokens
-                stats.busy             = False
 
         finish_chunk = json.dumps({
             "id": f"chatcmpl-{chunk_id}",
@@ -554,7 +559,7 @@ async def embeddings(req: EmbeddingRequest):
 
     return {
         "object": "list",
-        "model": model_id,
+        "model": req.model,
         "data": [{"object": "embedding", "index": i, "embedding": e} for i, e in enumerate(embs)],
         "usage": {"prompt_tokens": sum(len(tok.encode(t)) for t in texts), "total_tokens": 0}
     }
