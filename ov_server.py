@@ -450,10 +450,9 @@ async def health():
 
 @app.get("/v1/models")
 async def list_models():
-    all_ids = list(AVAILABLE_MODELS.keys()) + [EMBEDDING_MODEL_ID]
     return {"object": "list", "data": [
         {"id": mid, "object": "model", "capabilities": {"function_calling": True}}
-        for mid in all_ids
+        for mid in AVAILABLE_MODELS
     ]}
 
 
