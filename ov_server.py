@@ -332,10 +332,15 @@ async def list_models():
 
 @app.post("/v1/chat/completions")
 async def chat(req: ChatRequest):
+    # Detect tool-selection calls — either via OpenAI tools param or
+    # AnythingLLM's system-prompt style ("picks the most optimal function").
+    _sys = next((m.content for m in req.messages if m.role == "system"), "")
+    is_agent = bool(req.tools) or "picks the most optimal function" in _sys
+
     # Tool-selection calls use the smaller/faster model and skip thinking —
     # the model only needs to output a short JSON, not reason at length.
-    effective_model = AGENT_MODEL if req.tools else req.model
-    effective_thinking = req.thinking and not req.tools
+    effective_model = AGENT_MODEL if is_agent else req.model
+    effective_thinking = req.thinking and not is_agent
 
     pipe = await get_model(effective_model)
     model_id = next(k for k in loaded_models if loaded_models[k] is pipe)
@@ -400,7 +405,7 @@ async def chat(req: ChatRequest):
                 stats.last_tokens      = completion_tokens
                 stats.last_elapsed     = elapsed
                 stats.last_tok_per_sec = tok_per_sec
-                stats.last_request_at  = datetime.utcnow().strftime("%H:%M:%S")
+                stats.last_request_at  = datetime.now(datetime.UTC).strftime("%H:%M:%S")
                 stats.total_tokens    += completion_tokens
                 stats.busy             = False
 
@@ -448,7 +453,7 @@ async def chat(req: ChatRequest):
         stats.last_tokens      = completion_tokens
         stats.last_elapsed     = elapsed
         stats.last_tok_per_sec = tok_per_sec
-        stats.last_request_at  = datetime.utcnow().strftime("%H:%M:%S")
+        stats.last_request_at  = datetime.now(datetime.UTC).strftime("%H:%M:%S")
         stats.total_tokens    += completion_tokens
     finally:
         stats.busy = False
