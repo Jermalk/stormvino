@@ -4,7 +4,7 @@ from typing import List, Optional, Dict
 import openvino_genai as ov_genai
 from optimum.intel import OVModelForFeatureExtraction
 from transformers import AutoTokenizer
-import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal
+import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal, ctypes
 from functools import partial
 from fastapi.responses import StreamingResponse
 from fastapi import Request
@@ -14,7 +14,7 @@ import numpy as np
 from starlette.middleware.base import BaseHTTPMiddleware
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
-log = logging.getLogger(__name__)
+log = logging.getLogger("ov_server")
 
 debug_logging: bool = False
 
@@ -440,6 +440,7 @@ async def embeddings(req: EmbeddingRequest):
 
 if __name__ == "__main__":
     import uvicorn
+    ctypes.CDLL("libc.so.6").prctl(15, b"ov_server", 0, 0, 0)  # PR_SET_NAME
     if "--debug" in sys.argv:
         debug_logging = True
         log.info("Debug logging enabled (--debug flag)")

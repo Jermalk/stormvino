@@ -19,7 +19,7 @@ python3 /ov_server/ov_server.py --debug
 Logs go to the system journal. To follow live:
 
 ```bash
-journalctl -f _COMM=python3 | grep -E "DEBUG|INFO|ERROR"
+journalctl -f _COMM=ov_server
 ```
 
 ## Toggle debug logging without restart
