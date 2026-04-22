@@ -209,6 +209,45 @@ Aliases are resolved silently — the server logs the resolved name at `INFO` le
 
 ---
 
+## Conversion: VLM (INT4)
+
+Vision-language models use `--task image-text-to-text`. The exported directory will
+contain `openvino_language_model.xml` (split architecture) which is how the server
+distinguishes VLMs from text-only LLMs at discovery time.
+
+```bash
+~/.local/bin/optimum-cli export openvino \
+  --model Qwen/Qwen2.5-VL-7B-Instruct \
+  --task image-text-to-text \
+  --weight-format int4 \
+  --group-size 128 \
+  --ratio 1.0 \
+  --sym \
+  /opt/ov_server/models/qwen2.5-vl-7b-int4-ov
+```
+
+After conversion, add `"vision_model": "qwen2.5-vl-7b-int4-ov"` to `config.json`.
+The server routes any chat request containing `image_url` content parts to this model
+via `openvino_genai.VLMPipeline`. Text-only requests are unaffected.
+
+**OpenAI vision API format (what clients send):**
+```json
+{
+  "model": "qwen2.5-vl-7b-int4-ov",
+  "messages": [{
+    "role": "user",
+    "content": [
+      {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,<b64>"}},
+      {"type": "text", "text": "What tables are on this page?"}
+    ]
+  }]
+}
+```
+
+Images can be base64 data URIs (`data:image/...;base64,...`) or HTTP URLs.
+
+---
+
 ## Currently installed models
 
 | Directory | Type | VRAM (approx) | Role |
@@ -218,6 +257,7 @@ Aliases are resolved silently — the server logs the resolved name at `INFO` le
 | `qwen3-8b-int4` | LLM INT4 | 4.6 GB | agent / tool selection |
 | `qwen2.5-3b-int4` | LLM INT4 | 1.7 GB | lightweight fallback |
 | `multilingual-e5-large-int8` | embedding INT8 | 563 MB | `/v1/embeddings` |
+| `qwen2.5-vl-7b-int4-ov` | VLM INT4 | ~5–6 GB | document/image understanding (`vision_model`) |
 
 ---
 

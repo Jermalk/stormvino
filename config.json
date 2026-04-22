@@ -2,16 +2,19 @@
     "models_dir":             "/opt/ov_server/models",
     "device":                 "GPU.1",
     "ov_cache_dir":           "/tmp/ov_cache_b60",
-    "default_model":          "qwen2.5-coder-14b-int4",
-    "agent_model":            "qwen3-8b-int4",
+    "default_model":          "qwen3-14b-int4-ov",
+    "agent_model":            "qwen3-8b-int4-ov",
     "embedding_model":        "multilingual-e5-large-int8",
+    "vision_model":           "qwen2.5-vl-7b-int4-ov",
     "model_aliases":          {
         "qwen2.5-coder:14b":  "qwen2.5-coder-14b-int4",
-        "qwen3-14b-int4":     "qwen2.5-coder-14b-int4"
+        "qwen3-14b-int4":        "qwen3-14b-int4-ov"
     },
     "max_loaded_models":      2,
     "vram_headroom_gb":       1.5,
     "max_ram_percent":        75.0,
     "max_new_tokens_default": 2048,
-    "max_new_tokens_agent":   200
+    "max_new_tokens_agent":   200,
+    "vlm_max_image_turns":    1,
+    "vlm_max_image_side_px":  1280
 }

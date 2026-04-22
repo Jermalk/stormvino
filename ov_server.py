@@ -1,10 +1,12 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional, Tuple, Union
 import openvino_genai as ov_genai
 from optimum.intel import OVModelForFeatureExtraction
-from transformers import AutoTokenizer
+from transformers import AutoProcessor, AutoTokenizer
+import base64, io, urllib.request
 import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal, ctypes
+from PIL import Image
 from pathlib import Path
 from functools import partial
 from fastapi.responses import StreamingResponse
@@ -57,6 +59,8 @@ def _load_config() -> dict:
         "max_ram_percent":       75.0,
         "max_new_tokens_default": 2048,
         "max_new_tokens_agent":  200,
+        "vlm_max_image_turns":   1,     # keep images only from the last N user turns
+        "vlm_max_image_side_px": 1280,  # resize images so longest side ≤ this value
     }
     if _CONFIG_FILE.exists():
         try:
@@ -90,6 +94,19 @@ def _discover_models(models_dir: Path) -> Dict[str, str]:
     log.info(f"Discovered {len(found)} LLM model(s): {list(found)}")
     return found
 
+
+def _discover_vlm_models(models_dir: Path) -> Dict[str, str]:
+    """VLM directories are distinguished by openvino_language_model.xml (split architecture)."""
+    found: Dict[str, str] = {}
+    if not models_dir.exists():
+        return found
+    for d in sorted(models_dir.iterdir()):
+        if d.is_dir() and (d / "openvino_language_model.xml").exists():
+            found[d.name] = str(d)
+    log.info(f"Discovered {len(found)} VLM model(s): {list(found)}")
+    return found
+
+
 MODELS_DIR         = Path(_cfg["models_dir"])
 DEVICE             = _cfg["device"]
 CONFIG             = {"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": _cfg["ov_cache_dir"]}
@@ -99,8 +116,18 @@ MAX_NEW_TOKENS_AGENT   = _cfg["max_new_tokens_agent"]
 MAX_LOADED_MODELS  = _cfg["max_loaded_models"]
 VRAM_HEADROOM_GB   = _cfg["vram_headroom_gb"]
 MODEL_ALIASES: Dict[str, str] = _cfg["model_aliases"]
+VLM_MAX_IMAGE_TURNS:   int = int(_cfg["vlm_max_image_turns"])
+VLM_MAX_IMAGE_SIDE_PX: int = int(_cfg["vlm_max_image_side_px"])
 
-AVAILABLE_MODELS   = _discover_models(MODELS_DIR)
+AVAILABLE_MODELS     = _discover_models(MODELS_DIR)
+AVAILABLE_VLM_MODELS = _discover_vlm_models(MODELS_DIR)
+
+_vision_model_cfg = _cfg.get("vision_model", "")
+if _vision_model_cfg and _vision_model_cfg not in AVAILABLE_VLM_MODELS:
+    log.warning(f"Config vision_model='{_vision_model_cfg}' not found — known VLMs: {list(AVAILABLE_VLM_MODELS)}")
+VISION_MODEL: str = _vision_model_cfg if _vision_model_cfg in AVAILABLE_VLM_MODELS else (
+    next(iter(AVAILABLE_VLM_MODELS), "")
+)
 
 # Resolve default/agent model — use config value if present and valid,
 # otherwise fall back to first / smallest discovered model.
@@ -132,10 +159,22 @@ _model_lock = asyncio.Lock()           # serialises model load/evict
 _infer_locks: Dict[str, asyncio.Lock] = {}  # one per model — prevents concurrent generate()
 _emb_lock = asyncio.Lock()
 
+loaded_vlm_models: Dict[str, ov_genai.VLMPipeline] = {}
+loaded_vlm_tokenizers: Dict[str, AutoTokenizer] = {}
+_vlm_lock = asyncio.Lock()
+_vlm_infer_locks: Dict[str, asyncio.Lock] = {}
+
+
 def _infer_lock(model_id: str) -> asyncio.Lock:
     if model_id not in _infer_locks:
         _infer_locks[model_id] = asyncio.Lock()
     return _infer_locks[model_id]
+
+
+def _vlm_infer_lock(model_id: str) -> asyncio.Lock:
+    if model_id not in _vlm_infer_locks:
+        _vlm_infer_locks[model_id] = asyncio.Lock()
+    return _vlm_infer_locks[model_id]
 
 
 # ---------------------------------------------------------------------------
@@ -169,6 +208,111 @@ def check_memory():
 
 
 # ---------------------------------------------------------------------------
+# Content helpers — Message.content is str or list of parts (vision API)
+# ---------------------------------------------------------------------------
+def _text_content(msg: "Message") -> str:
+    """Extract plain text from a message whose content may be str or a list of parts."""
+    if isinstance(msg.content, list):
+        return " ".join(p.text for p in msg.content if p.type == "text" and p.text)
+    return msg.content or ""
+
+
+def _decode_image(url: str) -> Image.Image:
+    if url.startswith("data:"):
+        _, data = url.split(",", 1)
+        img = Image.open(io.BytesIO(base64.b64decode(data))).convert("RGB")
+    else:
+        with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310
+            img = Image.open(io.BytesIO(resp.read())).convert("RGB")
+    # Resize so the longest side ≤ VLM_MAX_IMAGE_SIDE_PX to bound KV-cache growth.
+    # Qwen2.5-VL uses 28×28 patches: a 1280px side → ~2090 tokens vs ~6760 for 2560px.
+    max_side = VLM_MAX_IMAGE_SIDE_PX
+    if max(img.width, img.height) > max_side:
+        scale = max_side / max(img.width, img.height)
+        img = img.resize((int(img.width * scale), int(img.height * scale)), Image.LANCZOS)
+        log.debug(f"Image resized to {img.width}×{img.height}")
+    return img
+
+
+def _pil_to_ov_tensor(img: Image.Image):
+    """Convert a PIL Image to an ov.Tensor (HWC uint8) as required by VLMPipeline."""
+    import openvino as ov
+    import numpy as np
+    return ov.Tensor(np.array(img, dtype=np.uint8))
+
+
+def _has_images(messages: List["Message"]) -> bool:
+    return any(
+        isinstance(m.content, list) and any(p.type == "image_url" for p in m.content)
+        for m in messages
+    )
+
+
+def _extract_images(messages: List["Message"]) -> List[Image.Image]:
+    images: List[Image.Image] = []
+    for m in messages:
+        if not isinstance(m.content, list):
+            continue
+        for p in m.content:
+            if p.type == "image_url" and p.image_url:
+                try:
+                    images.append(_decode_image(p.image_url.get("url", "")))
+                except Exception as exc:
+                    log.warning(f"Skipping unreadable image: {exc}")
+    return images
+
+
+def _limit_image_history(messages: List["Message"]) -> List["Message"]:
+    """Drop image parts from all but the most recent VLM_MAX_IMAGE_TURNS user turns.
+    Prevents VRAM growth from re-encoding every historical image on each new request."""
+    if VLM_MAX_IMAGE_TURNS <= 0:
+        return messages
+    image_turn_indices = [
+        i for i, m in enumerate(messages)
+        if m.role == "user"
+        and isinstance(m.content, list)
+        and any(p.type == "image_url" for p in m.content)
+    ]
+    drop = set(image_turn_indices[:-VLM_MAX_IMAGE_TURNS])
+    if not drop:
+        return messages
+    result = []
+    for i, m in enumerate(messages):
+        if i in drop:
+            result.append(Message(role=m.role, content=_text_content(m),
+                                  tool_call_id=m.tool_call_id, name=m.name))
+        else:
+            result.append(m)
+    log.debug(f"Image history limited: dropped images from {len(drop)} earlier turn(s)")
+    return result
+
+
+def build_vlm_prompt(messages: List["Message"], tokenizer: AutoTokenizer) -> str:
+    """Build a formatted prompt for VLMPipeline using the model's own chat template.
+    AutoTokenizer is used instead of AutoProcessor to avoid the torchvision dependency
+    pulled in by Qwen2.5-VL's video processor. The tokenizer's Jinja template handles
+    vision tokens identically."""
+    msg_dicts: List[Dict[str, Any]] = []
+    has_system = any(m.role == "system" for m in messages)
+    if not has_system:
+        msg_dicts.append({"role": "system", "content": "You are a helpful assistant."})
+    for m in messages:
+        if isinstance(m.content, list):
+            content: Any = []
+            for p in m.content:
+                if p.type == "image_url":
+                    content.append({"type": "image"})
+                elif p.type == "text" and p.text:
+                    content.append({"type": "text", "text": p.text})
+        else:
+            content = m.content or ""
+        msg_dicts.append({"role": m.role, "content": content})
+    return tokenizer.apply_chat_template(
+        msg_dicts, tokenize=False, add_generation_prompt=True
+    )
+
+
+# ---------------------------------------------------------------------------
 # Prompt builder — uses tokenizer's Jinja template so tools are formatted
 # correctly by the model's own template (Qwen3 knows its tool call format).
 # ---------------------------------------------------------------------------
@@ -181,9 +325,10 @@ def build_prompt(messages: List, tokenizer: AutoTokenizer,
     if not has_system:
         msg_dicts.append({"role": "system", "content": f"You are a helpful assistant.{suffix}"})
     for m in messages:
-        d: Dict[str, Any] = {"role": m.role, "content": m.content}
-        if m.role == "system" and not thinking and not m.content.endswith("/no_think"):
-            d["content"] = m.content.rstrip() + suffix
+        text = _text_content(m)
+        d: Dict[str, Any] = {"role": m.role, "content": text}
+        if m.role == "system" and not thinking and not text.endswith("/no_think"):
+            d["content"] = text.rstrip() + suffix
         if m.tool_call_id:
             d["tool_call_id"] = m.tool_call_id
         if m.name:
@@ -305,9 +450,10 @@ class AsyncTokenStreamer(ov_genai.StreamerBase):
 # ---------------------------------------------------------------------------
 def model_size_gb(model_id: str) -> float:
     """Disk size of model directory as a VRAM footprint estimate."""
-    return sum(
-        f.stat().st_size for f in Path(AVAILABLE_MODELS[model_id]).rglob("*") if f.is_file()
-    ) / 1024 ** 3
+    path = AVAILABLE_MODELS.get(model_id) or AVAILABLE_VLM_MODELS.get(model_id)
+    if not path:
+        return 0.0
+    return sum(f.stat().st_size for f in Path(path).rglob("*") if f.is_file()) / 1024 ** 3
 
 
 def vram_free_gb() -> Optional[float]:
@@ -402,12 +548,70 @@ async def get_embedding_model():
     return emb_model, emb_tokenizer
 
 
+async def get_vlm(model_id: str) -> Tuple[ov_genai.VLMPipeline, AutoTokenizer]:
+    if model_id in MODEL_ALIASES:
+        model_id = MODEL_ALIASES[model_id]
+    if not model_id or model_id not in AVAILABLE_VLM_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"VLM '{model_id}' not available. Known VLMs: {list(AVAILABLE_VLM_MODELS)}"
+        )
+    async with _vlm_lock:
+        if model_id in loaded_vlm_models:
+            model_last_used[model_id] = time.time()
+            return loaded_vlm_models[model_id], loaded_vlm_tokenizers[model_id]
+
+        check_memory()
+
+        # Keep at most one VLM in memory
+        if loaded_vlm_models:
+            lru = min(loaded_vlm_models, key=lambda k: model_last_used.get(k, 0))
+            log.info(f"Evicting VLM '{lru}'")
+            del loaded_vlm_models[lru]
+            del loaded_vlm_tokenizers[lru]
+            model_last_used.pop(lru, None)
+
+        # Evict an LLM if VRAM is tight
+        size = model_size_gb(model_id)
+        free = vram_free_gb()
+        if free is not None and free - size < VRAM_HEADROOM_GB and loaded_models:
+            log.info(f"VRAM free={free:.1f}GB, VLM={size:.1f}GB — evicting LRU LLM")
+            _evict_lru()
+
+        log.info(f"Loading VLM {model_id} (~{size:.1f}GB)...")
+        try:
+            loop = asyncio.get_running_loop()
+            pipe = await loop.run_in_executor(
+                None,
+                partial(ov_genai.VLMPipeline, AVAILABLE_VLM_MODELS[model_id], DEVICE, **CONFIG)
+            )
+            tokenizer = await loop.run_in_executor(
+                None,
+                partial(AutoTokenizer.from_pretrained, AVAILABLE_VLM_MODELS[model_id])
+            )
+            loaded_vlm_models[model_id] = pipe
+            loaded_vlm_tokenizers[model_id] = tokenizer
+            model_last_used[model_id] = time.time()
+            log.info(f"Loaded VLM {model_id}")
+        except Exception as exc:
+            log.error(f"Failed to load VLM {model_id}: {exc}")
+            raise HTTPException(status_code=500, detail=str(exc))
+
+    return loaded_vlm_models[model_id], loaded_vlm_tokenizers[model_id]
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
+class ContentPart(BaseModel):
+    type: str
+    text: Optional[str] = None
+    image_url: Optional[Dict[str, str]] = None
+
+
 class Message(BaseModel):
     role: str
-    content: str
+    content: Union[str, List[ContentPart], None] = None
     tool_call_id: Optional[str] = None
     name: Optional[str] = None
 
@@ -443,24 +647,160 @@ async def health():
         "total_tokens":     stats.total_tokens,
         "ram_used_pct":     ram.percent,
         "ram_available_gb": round(ram.available / 1024**3, 1),
-        "loaded_models":    list(loaded_models.keys()),
-        "embedding_loaded": emb_model is not None,
+        "loaded_models":     list(loaded_models.keys()),
+        "loaded_vlm_models": list(loaded_vlm_models.keys()),
+        "embedding_loaded":  emb_model is not None,
     }
 
 
 @app.get("/v1/models")
 async def list_models():
-    return {"object": "list", "data": [
+    llms = [
         {"id": mid, "object": "model", "capabilities": {"function_calling": True}}
         for mid in AVAILABLE_MODELS
-    ]}
+    ]
+    vlms = [
+        {"id": mid, "object": "model", "capabilities": {"vision": True}}
+        for mid in AVAILABLE_VLM_MODELS
+    ]
+    return {"object": "list", "data": llms + vlms}
+
+
+async def _chat_vlm(req: ChatRequest):
+    """Handle chat completions that contain image content (vision path)."""
+    if not VISION_MODEL:
+        raise HTTPException(status_code=400, detail="Image content received but no vision_model configured")
+
+    pipe, tokenizer = await get_vlm(VISION_MODEL)
+    model_id = VISION_MODEL
+
+    messages = _limit_image_history(req.messages)
+    images = [_pil_to_ov_tensor(img) for img in _extract_images(messages)]
+    prompt = build_vlm_prompt(messages, tokenizer)
+    if debug_logging:
+        log.info(f"[DEBUG] VLM prompt ({model_id}, {len(images)} image(s)):\n{prompt[:3000]}")
+
+    gen_config = ov_genai.GenerationConfig()
+    gen_config.max_new_tokens = req.max_tokens or MAX_NEW_TOKENS_DEFAULT
+    gen_config.temperature = req.temperature
+    gen_config.do_sample = req.temperature > 0
+
+    prompt_tokens = len(tokenizer.encode(prompt))
+
+    stats.active_requests += 1
+    stats.total_requests += 1
+
+    # --- Streaming ---
+    if req.stream:
+        queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        ov_tokenizer = pipe.get_tokenizer()
+        streamer = AsyncTokenStreamer(ov_tokenizer, queue, loop)
+
+        lock = _vlm_infer_lock(model_id)
+        await lock.acquire()
+
+        async def run_vlm_generation():
+            def _gen():
+                pipe.generate(prompt, images=images, generation_config=gen_config, streamer=streamer)
+            await loop.run_in_executor(None, _gen)
+
+        chunk_id = uuid.uuid4().hex[:8]
+
+        async def vlm_token_generator():
+            gen_task = asyncio.create_task(run_vlm_generation())
+            completion_tokens = 0
+            start = time.time()
+            try:
+                while True:
+                    token = await queue.get()
+                    if token is None:
+                        break
+                    completion_tokens += 1
+                    chunk = {
+                        "id": f"chatcmpl-{chunk_id}",
+                        "object": "chat.completion.chunk",
+                        "model": model_id,
+                        "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}],
+                    }
+                    yield f"data: {json.dumps(chunk)}\n\n"
+            finally:
+                await gen_task
+                lock.release()
+                stats.active_requests -= 1
+                elapsed = time.time() - start
+                tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
+                log.info(f"{model_id} [VLM stream]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
+                stats.last_model       = model_id
+                stats.last_tokens      = completion_tokens
+                stats.last_elapsed     = elapsed
+                stats.last_tok_per_sec = tok_per_sec
+                stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                stats.total_tokens    += completion_tokens
+
+        finish_chunk = json.dumps({
+            "id": f"chatcmpl-{chunk_id}",
+            "object": "chat.completion.chunk",
+            "model": model_id,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        })
+
+        async def vlm_full_stream():
+            async for chunk in vlm_token_generator():
+                yield chunk
+            yield f"data: {finish_chunk}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(vlm_full_stream(), media_type="text/event-stream")
+
+    # --- Non-streaming ---
+    try:
+        start = time.time()
+        loop = asyncio.get_running_loop()
+        async with _vlm_infer_lock(model_id):
+            def _gen():
+                return pipe.generate(prompt, images=images, generation_config=gen_config)
+            raw = await loop.run_in_executor(None, _gen)
+        elapsed = time.time() - start
+
+        raw_text = decode_result(raw)
+        thinking, answer = extract_thinking(raw_text)
+        message = {"role": "assistant", "content": format_thinking(thinking, answer)}
+
+        completion_tokens = len(tokenizer.encode(answer or ""))
+        tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
+        log.info(f"{model_id} [VLM]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
+
+        stats.last_model       = model_id
+        stats.last_tokens      = completion_tokens
+        stats.last_elapsed     = elapsed
+        stats.last_tok_per_sec = tok_per_sec
+        stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        stats.total_tokens    += completion_tokens
+    finally:
+        stats.active_requests -= 1
+
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
+        "object": "chat.completion",
+        "model": model_id,
+        "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+        "usage": {
+            "prompt_tokens":     prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens":      prompt_tokens + completion_tokens,
+        },
+    }
 
 
 @app.post("/v1/chat/completions")
 async def chat(req: ChatRequest):
+    if _has_images(req.messages):
+        return await _chat_vlm(req)
+
     # Detect tool-selection calls — either via OpenAI tools param or
     # AnythingLLM's system-prompt style ("picks the most optimal function").
-    _sys = next((m.content for m in req.messages if m.role == "system"), "")
+    _sys = next((_text_content(m) for m in req.messages if m.role == "system"), "")
     is_agent = bool(req.tools) or "picks the most optimal function" in _sys
 
     # Tool-selection calls use the smaller/faster model and skip thinking —
