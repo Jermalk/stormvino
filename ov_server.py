@@ -4,15 +4,35 @@ from typing import List, Optional, Dict
 import openvino_genai as ov_genai
 from optimum.intel import OVModelForFeatureExtraction
 from transformers import AutoTokenizer
-import psutil, time, uuid, os, logging, asyncio, dataclasses, re
+import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal
 from functools import partial
 from fastapi.responses import StreamingResponse
+from fastapi import Request
 from datetime import datetime
 import json
 import numpy as np
+from starlette.middleware.base import BaseHTTPMiddleware
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger(__name__)
+
+debug_logging: bool = False
+
+def _toggle_debug(sig, frame):
+    global debug_logging
+    debug_logging = not debug_logging
+    log.info(f"Debug logging {'enabled' if debug_logging else 'disabled'} (SIGUSR1)")
+
+signal.signal(signal.SIGUSR1, _toggle_debug)
+
+
+class DebugLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if debug_logging and request.method == "POST":
+            body = await request.body()
+            log.info(f"[DEBUG] {request.method} {request.url.path} | {body.decode()[:4000]}")
+        return await call_next(request)
+
 
 app = FastAPI()
 
@@ -420,4 +440,9 @@ async def embeddings(req: EmbeddingRequest):
 
 if __name__ == "__main__":
     import uvicorn
+    if "--debug" in sys.argv:
+        global debug_logging
+        debug_logging = True
+        log.info("Debug logging enabled (--debug flag)")
+    app.add_middleware(DebugLoggingMiddleware)
     uvicorn.run(app, host="0.0.0.0", port=11435, workers=1, loop="asyncio")
