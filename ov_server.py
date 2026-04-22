@@ -40,13 +40,14 @@ MODELS_DIR = os.path.expanduser("~/ov_models")
 DEVICE = "GPU.1"
 CONFIG = {"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "/tmp/ov_cache_b60"}
 MAX_RAM_PERCENT = 75.0
-MAX_NEW_TOKENS_DEFAULT = 512
+MAX_NEW_TOKENS_DEFAULT = 2048
 
 AVAILABLE_MODELS = {
     "qwen2.5-3b-int4": f"{MODELS_DIR}/qwen2.5-3b-int4",
     "qwen3-14b-int4":  f"{MODELS_DIR}/qwen3-14b-int4",
 }
 DEFAULT_MODEL = "qwen3-14b-int4"
+AGENT_MODEL  = "qwen2.5-3b-int4"   # used when tools are present — faster for selection
 
 EMBEDDING_MODEL_ID = "multilingual-e5-large-int8"
 EMBEDDING_MODEL_PATH = f"{MODELS_DIR}/{EMBEDDING_MODEL_ID}"
@@ -331,11 +332,16 @@ async def list_models():
 
 @app.post("/v1/chat/completions")
 async def chat(req: ChatRequest):
-    pipe = await get_model(req.model)
+    # Tool-selection calls use the smaller/faster model and skip thinking —
+    # the model only needs to output a short JSON, not reason at length.
+    effective_model = AGENT_MODEL if req.tools else req.model
+    effective_thinking = req.thinking and not req.tools
+
+    pipe = await get_model(effective_model)
     model_id = next(k for k in loaded_models if loaded_models[k] is pipe)
     tokenizer = loaded_tokenizers[model_id]
 
-    prompt = build_prompt(req.messages, tokenizer, tools=req.tools, thinking=req.thinking)
+    prompt = build_prompt(req.messages, tokenizer, tools=req.tools, thinking=effective_thinking)
 
     gen_config = ov_genai.GenerationConfig()
     gen_config.max_new_tokens = req.max_tokens
