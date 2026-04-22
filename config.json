@@ -6,7 +6,8 @@
     "agent_model":            "qwen3-8b-int4",
     "embedding_model":        "multilingual-e5-large-int8",
     "model_aliases":          {
-        "qwen2.5-coder:14b":  "qwen2.5-coder-14b-int4"
+        "qwen2.5-coder:14b":  "qwen2.5-coder-14b-int4",
+        "qwen3-14b-int4":     "qwen2.5-coder-14b-int4"
     },
     "max_loaded_models":      2,
     "vram_headroom_gb":       1.5,
