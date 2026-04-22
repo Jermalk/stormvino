@@ -9,7 +9,7 @@ from pathlib import Path
 from functools import partial
 from fastapi.responses import StreamingResponse
 from fastapi import Request
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import numpy as np
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -297,7 +297,7 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
             )
             tokenizer = await loop.run_in_executor(
                 None,
-                partial(AutoTokenizer.from_pretrained, AVAILABLE_MODELS[model_id])
+                partial(AutoTokenizer.from_pretrained, AVAILABLE_MODELS[model_id], fix_mistral_regex=True)
             )
             loaded_models[model_id] = pipe
             loaded_tokenizers[model_id] = tokenizer
@@ -457,7 +457,7 @@ async def chat(req: ChatRequest):
                 stats.last_tokens      = completion_tokens
                 stats.last_elapsed     = elapsed
                 stats.last_tok_per_sec = tok_per_sec
-                stats.last_request_at  = datetime.now(datetime.UTC).strftime("%H:%M:%S")
+                stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
                 stats.total_tokens    += completion_tokens
                 stats.busy             = False
 
@@ -505,7 +505,7 @@ async def chat(req: ChatRequest):
         stats.last_tokens      = completion_tokens
         stats.last_elapsed     = elapsed
         stats.last_tok_per_sec = tok_per_sec
-        stats.last_request_at  = datetime.now(datetime.UTC).strftime("%H:%M:%S")
+        stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
         stats.total_tokens    += completion_tokens
     finally:
         stats.busy = False
