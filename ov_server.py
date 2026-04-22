@@ -5,6 +5,7 @@ import openvino_genai as ov_genai
 from optimum.intel import OVModelForFeatureExtraction
 from transformers import AutoTokenizer
 import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal, ctypes
+from pathlib import Path
 from functools import partial
 from fastapi.responses import StreamingResponse
 from fastapi import Request
@@ -46,8 +47,10 @@ AVAILABLE_MODELS = {
     "qwen2.5-3b-int4": f"{MODELS_DIR}/qwen2.5-3b-int4",
     "qwen3-14b-int4":  f"{MODELS_DIR}/qwen3-14b-int4",
 }
-DEFAULT_MODEL = "qwen3-14b-int4"
-AGENT_MODEL  = "qwen2.5-3b-int4"   # used when tools are present — faster for selection
+DEFAULT_MODEL      = "qwen3-14b-int4"
+AGENT_MODEL        = "qwen2.5-3b-int4"   # used when tools are present — faster for selection
+MAX_LOADED_MODELS  = 2
+VRAM_HEADROOM_GB   = 1.5   # keep this much VRAM free to avoid system-RAM spill
 
 EMBEDDING_MODEL_ID = "multilingual-e5-large-int8"
 EMBEDDING_MODEL_PATH = f"{MODELS_DIR}/{EMBEDDING_MODEL_ID}"
@@ -55,6 +58,7 @@ EMBEDDING_MODEL_PATH = f"{MODELS_DIR}/{EMBEDDING_MODEL_ID}"
 # --- State ---
 loaded_models: Dict[str, ov_genai.LLMPipeline] = {}
 loaded_tokenizers: Dict[str, AutoTokenizer] = {}
+model_last_used: Dict[str, float] = {}
 emb_model = None
 emb_tokenizer = None
 _model_lock = asyncio.Lock()
@@ -225,6 +229,38 @@ class AsyncTokenStreamer(ov_genai.StreamerBase):
 
 
 # ---------------------------------------------------------------------------
+# VRAM helpers
+# ---------------------------------------------------------------------------
+def model_size_gb(model_id: str) -> float:
+    """Disk size of model directory as a VRAM footprint estimate."""
+    return sum(
+        f.stat().st_size for f in Path(AVAILABLE_MODELS[model_id]).rglob("*") if f.is_file()
+    ) / 1024 ** 3
+
+
+def vram_free_gb() -> Optional[float]:
+    """Query free VRAM from OpenVINO. Returns None if unavailable."""
+    try:
+        import openvino as ov
+        core = ov.Core()
+        stats = core.get_property(DEVICE, "GPU_MEMORY_STATISTICS")
+        total = core.get_property(DEVICE, "GPU_DEVICE_TOTAL_MEM_SIZE")
+        used = sum(v for k, v in stats.items() if "current" in k.lower())
+        return (total - used) / 1024 ** 3
+    except Exception as e:
+        log.debug(f"VRAM query failed: {e}")
+        return None
+
+
+def _evict_lru() -> None:
+    lru = min(loaded_models, key=lambda k: model_last_used.get(k, 0))
+    log.info(f"Evicting LRU model '{lru}' to free VRAM")
+    del loaded_models[lru]
+    del loaded_tokenizers[lru]
+    model_last_used.pop(lru, None)
+
+
+# ---------------------------------------------------------------------------
 # Model loader — async-safe, with lock
 # ---------------------------------------------------------------------------
 async def get_model(model_id: str) -> ov_genai.LLMPipeline:
@@ -232,25 +268,44 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
         log.warning(f"Unknown model '{model_id}', falling back to {DEFAULT_MODEL}")
         model_id = DEFAULT_MODEL
     async with _model_lock:
-        if model_id not in loaded_models:
-            check_memory()
-            log.info(f"Loading {model_id}...")
-            try:
-                loop = asyncio.get_running_loop()
-                pipe = await loop.run_in_executor(
-                    None,
-                    partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE, **CONFIG)
-                )
-                tokenizer = await loop.run_in_executor(
-                    None,
-                    partial(AutoTokenizer.from_pretrained, AVAILABLE_MODELS[model_id])
-                )
-                loaded_models[model_id] = pipe
-                loaded_tokenizers[model_id] = tokenizer
-                log.info(f"Loaded {model_id}")
-            except Exception as e:
-                log.error(f"Failed to load {model_id}: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+        if model_id in loaded_models:
+            model_last_used[model_id] = time.time()
+            return loaded_models[model_id]
+
+        check_memory()
+
+        # Hard cap: evict LRU until under the model limit
+        while len(loaded_models) >= MAX_LOADED_MODELS:
+            _evict_lru()
+
+        # Soft cap: evict LRU if new model would exceed VRAM headroom
+        size = model_size_gb(model_id)
+        free = vram_free_gb()
+        if free is not None:
+            if free - size < VRAM_HEADROOM_GB and loaded_models:
+                log.info(f"VRAM free={free:.1f}GB, model={size:.1f}GB, headroom={VRAM_HEADROOM_GB}GB — evicting LRU")
+                _evict_lru()
+        else:
+            log.debug("VRAM query unavailable — relying on model count limit only")
+
+        log.info(f"Loading {model_id} (~{size:.1f}GB)...")
+        try:
+            loop = asyncio.get_running_loop()
+            pipe = await loop.run_in_executor(
+                None,
+                partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE, **CONFIG)
+            )
+            tokenizer = await loop.run_in_executor(
+                None,
+                partial(AutoTokenizer.from_pretrained, AVAILABLE_MODELS[model_id])
+            )
+            loaded_models[model_id] = pipe
+            loaded_tokenizers[model_id] = tokenizer
+            model_last_used[model_id] = time.time()
+            log.info(f"Loaded {model_id}")
+        except Exception as e:
+            log.error(f"Failed to load {model_id}: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
     return loaded_models[model_id]
 
 
