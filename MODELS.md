@@ -213,7 +213,8 @@ Aliases are resolved silently — the server logs the resolved name at `INFO` le
 
 | Directory | Type | VRAM (approx) | Role |
 |---|---|---|---|
-| `qwen3-14b-int4` | LLM INT4 | 9.1 GB | default chat model |
+| `qwen2.5-coder-14b-int4` | LLM INT4 | ~9 GB | default — code/SQL/database analysis |
+| `qwen3-14b-int4` | LLM INT4 | 9.1 GB | general chat / reasoning |
 | `qwen3-8b-int4` | LLM INT4 | 4.6 GB | agent / tool selection |
 | `qwen2.5-3b-int4` | LLM INT4 | 1.7 GB | lightweight fallback |
 | `multilingual-e5-large-int8` | embedding INT8 | 563 MB | `/v1/embeddings` |
