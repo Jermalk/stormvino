@@ -42,6 +42,7 @@ DEVICE = "GPU.1"
 CONFIG = {"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "/tmp/ov_cache_b60"}
 MAX_RAM_PERCENT = 75.0
 MAX_NEW_TOKENS_DEFAULT = 2048
+MAX_NEW_TOKENS_AGENT  = 200    # agent tool-selection only needs a short JSON
 
 AVAILABLE_MODELS = {
     "qwen2.5-3b-int4": f"{MODELS_DIR}/qwen2.5-3b-int4",
@@ -409,7 +410,7 @@ async def chat(req: ChatRequest):
     prompt = build_prompt(req.messages, tokenizer, tools=req.tools, thinking=effective_thinking)
 
     gen_config = ov_genai.GenerationConfig()
-    gen_config.max_new_tokens = req.max_tokens
+    gen_config.max_new_tokens = MAX_NEW_TOKENS_AGENT if is_agent else req.max_tokens
     gen_config.temperature = req.temperature
     gen_config.do_sample = req.temperature > 0
 
