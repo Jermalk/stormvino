@@ -46,6 +46,7 @@ AVAILABLE_MODELS = {
     "qwen2.5-3b-int4": f"{MODELS_DIR}/qwen2.5-3b-int4",
     "qwen3-14b-int4":  f"{MODELS_DIR}/qwen3-14b-int4",
 }
+DEFAULT_MODEL = "qwen3-14b-int4"
 
 EMBEDDING_MODEL_ID = "multilingual-e5-large-int8"
 EMBEDDING_MODEL_PATH = f"{MODELS_DIR}/{EMBEDDING_MODEL_ID}"
@@ -227,7 +228,8 @@ class AsyncTokenStreamer(ov_genai.StreamerBase):
 # ---------------------------------------------------------------------------
 async def get_model(model_id: str) -> ov_genai.LLMPipeline:
     if model_id not in AVAILABLE_MODELS:
-        raise HTTPException(status_code=404, detail=f"Unknown model: {model_id}")
+        log.warning(f"Unknown model '{model_id}', falling back to {DEFAULT_MODEL}")
+        model_id = DEFAULT_MODEL
     async with _model_lock:
         if model_id not in loaded_models:
             check_memory()
@@ -330,7 +332,8 @@ async def list_models():
 @app.post("/v1/chat/completions")
 async def chat(req: ChatRequest):
     pipe = await get_model(req.model)
-    tokenizer = loaded_tokenizers[req.model]
+    model_id = next(k for k in loaded_models if loaded_models[k] is pipe)
+    tokenizer = loaded_tokenizers[model_id]
 
     prompt = build_prompt(req.messages, tokenizer, tools=req.tools, thinking=req.thinking)
 
@@ -374,7 +377,7 @@ async def chat(req: ChatRequest):
                     chunk = {
                         "id": f"chatcmpl-{chunk_id}",
                         "object": "chat.completion.chunk",
-                        "model": req.model,
+                        "model": model_id,
                         "choices": [{
                             "index": 0,
                             "delta": {"content": token},
@@ -386,8 +389,8 @@ async def chat(req: ChatRequest):
                 await gen_task
                 elapsed = time.time() - start
                 tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
-                log.info(f"{req.model} [stream]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
-                stats.last_model       = req.model
+                log.info(f"{model_id} [stream]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
+                stats.last_model       = model_id
                 stats.last_tokens      = completion_tokens
                 stats.last_elapsed     = elapsed
                 stats.last_tok_per_sec = tok_per_sec
@@ -398,7 +401,7 @@ async def chat(req: ChatRequest):
         finish_chunk = json.dumps({
             "id": f"chatcmpl-{chunk_id}",
             "object": "chat.completion.chunk",
-            "model": req.model,
+            "model": model_id,
             "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
         })
 
@@ -435,7 +438,7 @@ async def chat(req: ChatRequest):
         tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
         log.info(f"{req.model}: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s | finish={finish_reason}")
 
-        stats.last_model       = req.model
+        stats.last_model       = model_id
         stats.last_tokens      = completion_tokens
         stats.last_elapsed     = elapsed
         stats.last_tok_per_sec = tok_per_sec
@@ -447,7 +450,7 @@ async def chat(req: ChatRequest):
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
         "object": "chat.completion",
-        "model": req.model,
+        "model": model_id,
         "choices": [{
             "index": 0,
             "message": message,
@@ -479,7 +482,7 @@ async def embeddings(req: EmbeddingRequest):
 
     return {
         "object": "list",
-        "model": req.model,
+        "model": model_id,
         "data": [{"object": "embedding", "index": i, "embedding": e} for i, e in enumerate(embs)],
         "usage": {"prompt_tokens": sum(len(tok.encode(t)) for t in texts), "total_tokens": 0}
     }
