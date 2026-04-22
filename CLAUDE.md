@@ -15,10 +15,11 @@ FastAPI server exposing an OpenAI-compatible REST API (`/v1/chat/completions`, `
 | Prompt building | `build_chatml()` | Manual ChatML — **no tool call support yet** |
 | Streaming | `AsyncTokenStreamer` | Subclass of `ov_genai.StreamerBase`; event loop captured at construction |
 | Embeddings | `OVModelForFeatureExtraction` (optimum-intel) | Mean-pooled, L2-normalised |
-| Models | `qwen2.5-3b-int4`, `qwen3-14b-int4` | Loaded one at a time; previous evicted on swap |
+| Models | `qwen2.5-3b-int4`, `qwen3-8b-int4`, `qwen3-14b-int4` | Up to 2 loaded; LRU eviction with VRAM check |
 
-**Entry point:** `/ov_server/ov_server.py`
-**Models dir:** `~/ov_models/`
+**Entry point:** `/opt/ov_server/ov_server.py`
+**Config file:** `/opt/ov_server/config.json`
+**Models dir:** `~/ov_models/` (configured in `config.json`, auto-discovered at startup)
 **Cache dir:** `/tmp/ov_cache_b60`
 **Device:** `GPU.1` with `PERFORMANCE_HINT=LATENCY`
 
@@ -144,6 +145,7 @@ For every issue, complete this sequence before writing a fix:
 | File | Purpose |
 |---|---|
 | `ov_server.py` | Single-file server — keep it that way unless a module exceeds ~200 lines of distinct concern |
+| `config.json` | Runtime config: models_dir, device, model names, limits. Server falls back to defaults if absent. |
 | `README.md` | User-facing commands: start, logs, debug toggle, network access, health/model checks |
 | `DECISIONS.md` | Architectural choices with rationale |
 | `PROGRESS.md` | Completed steps, current state, next actions |

@@ -37,30 +37,90 @@ class DebugLoggingMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI()
 
-MODELS_DIR = os.path.expanduser("~/ov_models")
-DEVICE = "GPU.1"
-CONFIG = {"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": "/tmp/ov_cache_b60"}
-MAX_RAM_PERCENT = 75.0
-MAX_NEW_TOKENS_DEFAULT = 2048
-MAX_NEW_TOKENS_AGENT  = 200    # agent tool-selection only needs a short JSON
+# ---------------------------------------------------------------------------
+# Config — loaded from config.json next to this script, falls back to
+# defaults so the server starts even without a config file.
+# ---------------------------------------------------------------------------
+_CONFIG_FILE = Path(__file__).parent / "config.json"
 
-AVAILABLE_MODELS = {
-    "qwen2.5-3b-int4": f"{MODELS_DIR}/qwen2.5-3b-int4",
-    "qwen3-14b-int4":  f"{MODELS_DIR}/qwen3-14b-int4",
-}
-DEFAULT_MODEL      = "qwen3-14b-int4"
-AGENT_MODEL        = "qwen2.5-3b-int4"   # used when tools are present — faster for selection
-MAX_LOADED_MODELS  = 2
-VRAM_HEADROOM_GB   = 1.5   # keep this much VRAM free to avoid system-RAM spill
+def _load_config() -> dict:
+    defaults = {
+        "models_dir":            str(Path(__file__).parent / "models"),
+        "device":                "GPU.1",
+        "ov_cache_dir":          "/tmp/ov_cache_b60",
+        "default_model":         "",          # resolved after discovery if empty
+        "agent_model":           "",          # resolved after discovery if empty
+        "embedding_model":       "",          # resolved after discovery if empty
+        "model_aliases":         {},
+        "max_loaded_models":     2,
+        "vram_headroom_gb":      1.5,
+        "max_ram_percent":       75.0,
+        "max_new_tokens_default": 2048,
+        "max_new_tokens_agent":  200,
+    }
+    if _CONFIG_FILE.exists():
+        try:
+            with _CONFIG_FILE.open() as f:
+                overrides = json.load(f)
+            defaults.update(overrides)
+            log.info(f"Config loaded from {_CONFIG_FILE}")
+        except Exception as e:
+            log.warning(f"Failed to read {_CONFIG_FILE}: {e} — using defaults")
+    else:
+        log.warning(f"No config.json found at {_CONFIG_FILE} — using defaults")
+    return defaults
 
-# Client model names that don't match AVAILABLE_MODELS keys (e.g. AnythingLLM
-# sends its configured name regardless of what the server actually runs).
-MODEL_ALIASES: Dict[str, str] = {
-    "qwen2.5-coder:14b": "qwen3-14b-int4",
-}
+_cfg = _load_config()
 
-EMBEDDING_MODEL_ID = "multilingual-e5-large-int8"
-EMBEDDING_MODEL_PATH = f"{MODELS_DIR}/{EMBEDDING_MODEL_ID}"
+# ---------------------------------------------------------------------------
+# Model discovery — scans models_dir for valid OpenVINO LLM directories.
+# A directory is an LLM if it contains openvino_model.xml AND
+# openvino_detokenizer.xml (distinguishes LLMs from embedding models).
+# ---------------------------------------------------------------------------
+def _discover_models(models_dir: Path) -> Dict[str, str]:
+    found: Dict[str, str] = {}
+    if not models_dir.exists():
+        log.warning(f"Models directory {models_dir} does not exist")
+        return found
+    for d in sorted(models_dir.iterdir()):
+        if (d.is_dir()
+                and (d / "openvino_model.xml").exists()
+                and (d / "generation_config.json").exists()):
+            found[d.name] = str(d)
+    log.info(f"Discovered {len(found)} LLM model(s): {list(found)}")
+    return found
+
+MODELS_DIR         = Path(_cfg["models_dir"])
+DEVICE             = _cfg["device"]
+CONFIG             = {"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": _cfg["ov_cache_dir"]}
+MAX_RAM_PERCENT    = _cfg["max_ram_percent"]
+MAX_NEW_TOKENS_DEFAULT = _cfg["max_new_tokens_default"]
+MAX_NEW_TOKENS_AGENT   = _cfg["max_new_tokens_agent"]
+MAX_LOADED_MODELS  = _cfg["max_loaded_models"]
+VRAM_HEADROOM_GB   = _cfg["vram_headroom_gb"]
+MODEL_ALIASES: Dict[str, str] = _cfg["model_aliases"]
+
+AVAILABLE_MODELS   = _discover_models(MODELS_DIR)
+
+# Resolve default/agent model — use config value if present and valid,
+# otherwise fall back to first / smallest discovered model.
+def _pick(key: str, fallback_index: int) -> str:
+    name = _cfg.get(key, "")
+    if name and name in AVAILABLE_MODELS:
+        return name
+    if AVAILABLE_MODELS:
+        picked = list(AVAILABLE_MODELS)[min(fallback_index, len(AVAILABLE_MODELS) - 1)]
+        log.warning(f"Config '{key}={name}' not found — using '{picked}'")
+        return picked
+    return ""
+
+DEFAULT_MODEL = _pick("default_model", -1)   # last (usually largest)
+AGENT_MODEL   = _pick("agent_model",    0)   # first (usually smallest)
+
+# Embedding model — not auto-discovered (loaded via different code path)
+_emb_name          = _cfg.get("embedding_model", "")
+EMBEDDING_MODEL_ID   = _emb_name
+EMBEDDING_MODEL_PATH = str(MODELS_DIR / _emb_name) if _emb_name else ""
 
 # --- State ---
 loaded_models: Dict[str, ov_genai.LLMPipeline] = {}

@@ -1,0 +1,16 @@
+{
+    "models_dir":             "/home/jerzy/ov_models",
+    "device":                 "GPU.1",
+    "ov_cache_dir":           "/tmp/ov_cache_b60",
+    "default_model":          "qwen3-14b-int4",
+    "agent_model":            "qwen3-8b-int4",
+    "embedding_model":        "multilingual-e5-large-int8",
+    "model_aliases":          {
+        "qwen2.5-coder:14b":  "qwen3-14b-int4"
+    },
+    "max_loaded_models":      2,
+    "vram_headroom_gb":       1.5,
+    "max_ram_percent":        75.0,
+    "max_new_tokens_default": 2048,
+    "max_new_tokens_agent":   200
+}

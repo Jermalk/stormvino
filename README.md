@@ -5,14 +5,33 @@ OpenVINO-backed OpenAI-compatible API server. Exposes `/v1/chat/completions`, `/
 ## Starting the server
 
 ```bash
-python3 /ov_server/ov_server.py
+python3 /opt/ov_server/ov_server.py
 ```
 
 With debug request logging:
 
 ```bash
-python3 /ov_server/ov_server.py --debug
+python3 /opt/ov_server/ov_server.py --debug
 ```
+
+## Configuration
+
+Runtime settings live in `config.json` next to `ov_server.py`. The server starts with built-in defaults if the file is absent.
+
+| Key | Default | Description |
+|---|---|---|
+| `models_dir` | `<script dir>/models` | Directory scanned for OpenVINO LLM models at startup |
+| `device` | `GPU.1` | OpenVINO device |
+| `default_model` | (first discovered) | Model used when the client does not specify one |
+| `agent_model` | (first discovered) | Smaller model used for tool-call / agent turns |
+| `embedding_model` | `""` | Embedding model subdirectory name |
+| `model_aliases` | `{}` | Map client model names to discovered model names |
+| `max_loaded_models` | `2` | Max models kept in VRAM simultaneously |
+| `vram_headroom_gb` | `1.5` | Free VRAM required before loading an additional model |
+| `max_new_tokens_default` | `2048` | Token cap for normal chat |
+| `max_new_tokens_agent` | `200` | Token cap for agent/tool-selection turns |
+
+Models are auto-discovered: any subdirectory of `models_dir` that contains both `openvino_model.xml` and `generation_config.json` is registered as an LLM.
 
 ## Logs
 
