@@ -441,7 +441,6 @@ async def embeddings(req: EmbeddingRequest):
 if __name__ == "__main__":
     import uvicorn
     if "--debug" in sys.argv:
-        global debug_logging
         debug_logging = True
         log.info("Debug logging enabled (--debug flag)")
     app.add_middleware(DebugLoggingMiddleware)
