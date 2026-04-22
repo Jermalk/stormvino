@@ -52,6 +52,12 @@ AGENT_MODEL        = "qwen2.5-3b-int4"   # used when tools are present — faste
 MAX_LOADED_MODELS  = 2
 VRAM_HEADROOM_GB   = 1.5   # keep this much VRAM free to avoid system-RAM spill
 
+# Client model names that don't match AVAILABLE_MODELS keys (e.g. AnythingLLM
+# sends its configured name regardless of what the server actually runs).
+MODEL_ALIASES: Dict[str, str] = {
+    "qwen2.5-coder:14b": "qwen3-14b-int4",
+}
+
 EMBEDDING_MODEL_ID = "multilingual-e5-large-int8"
 EMBEDDING_MODEL_PATH = f"{MODELS_DIR}/{EMBEDDING_MODEL_ID}"
 
@@ -264,7 +270,9 @@ def _evict_lru() -> None:
 # Model loader — async-safe, with lock
 # ---------------------------------------------------------------------------
 async def get_model(model_id: str) -> ov_genai.LLMPipeline:
-    if model_id not in AVAILABLE_MODELS:
+    if model_id in MODEL_ALIASES:
+        model_id = MODEL_ALIASES[model_id]
+    elif model_id not in AVAILABLE_MODELS:
         log.warning(f"Unknown model '{model_id}', falling back to {DEFAULT_MODEL}")
         model_id = DEFAULT_MODEL
     async with _model_lock:
