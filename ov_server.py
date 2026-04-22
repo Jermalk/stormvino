@@ -68,8 +68,14 @@ loaded_tokenizers: Dict[str, AutoTokenizer] = {}
 model_last_used: Dict[str, float] = {}
 emb_model = None
 emb_tokenizer = None
-_model_lock = asyncio.Lock()
+_model_lock = asyncio.Lock()           # serialises model load/evict
+_infer_locks: Dict[str, asyncio.Lock] = {}  # one per model — prevents concurrent generate()
 _emb_lock = asyncio.Lock()
+
+def _infer_lock(model_id: str) -> asyncio.Lock:
+    if model_id not in _infer_locks:
+        _infer_locks[model_id] = asyncio.Lock()
+    return _infer_locks[model_id]
 
 
 # ---------------------------------------------------------------------------
@@ -77,8 +83,7 @@ _emb_lock = asyncio.Lock()
 # ---------------------------------------------------------------------------
 @dataclasses.dataclass
 class ServerStats:
-    busy: bool = False
-    busy_since: float = 0.0
+    active_requests: int = 0
     last_model: str = ""
     last_tokens: int = 0
     last_elapsed: float = 0.0
@@ -366,11 +371,9 @@ class EmbeddingRequest(BaseModel):
 @app.get("/health")
 async def health():
     ram = psutil.virtual_memory()
-    busy_for = round(time.time() - stats.busy_since, 1) if stats.busy else 0.0
     return {
-        "status":           "busy" if stats.busy else "ok",
-        "busy":             stats.busy,
-        "busy_for_sec":     busy_for,
+        "status":           "busy" if stats.active_requests else "ok",
+        "active_requests":  stats.active_requests,
         "last_model":       stats.last_model,
         "last_tok_per_sec": round(stats.last_tok_per_sec, 1),
         "last_tokens":      stats.last_tokens,
@@ -421,8 +424,7 @@ async def chat(req: ChatRequest):
 
     prompt_tokens = len(tokenizer.encode(prompt))
 
-    stats.busy = True
-    stats.busy_since = time.time()
+    stats.active_requests += 1
     stats.total_requests += 1
 
     # --- Streaming ---
@@ -431,6 +433,12 @@ async def chat(req: ChatRequest):
         loop = asyncio.get_running_loop()
         ov_tokenizer = pipe.get_tokenizer()
         streamer = AsyncTokenStreamer(ov_tokenizer, queue, loop)
+
+        # Acquire per-model inference lock before starting — held until
+        # generation completes so concurrent requests on the same pipeline
+        # are serialised. Different models run concurrently without waiting.
+        lock = _infer_lock(model_id)
+        await lock.acquire()
 
         async def run_generation():
             await loop.run_in_executor(
@@ -464,7 +472,8 @@ async def chat(req: ChatRequest):
                     yield f"data: {json.dumps(chunk)}\n\n"
             finally:
                 await gen_task
-                stats.busy = False
+                lock.release()
+                stats.active_requests -= 1
                 elapsed = time.time() - start
                 tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
                 log.info(f"{model_id} [stream]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
@@ -494,7 +503,8 @@ async def chat(req: ChatRequest):
     try:
         start = time.time()
         loop = asyncio.get_running_loop()
-        raw = await loop.run_in_executor(None, partial(pipe.generate, prompt, gen_config))
+        async with _infer_lock(model_id):
+            raw = await loop.run_in_executor(None, partial(pipe.generate, prompt, gen_config))
         elapsed = time.time() - start
 
         # FIX: safely extract string from whatever generate() returns
@@ -522,7 +532,7 @@ async def chat(req: ChatRequest):
         stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
         stats.total_tokens    += completion_tokens
     finally:
-        stats.busy = False
+        stats.active_requests -= 1
 
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
