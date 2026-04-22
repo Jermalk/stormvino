@@ -33,6 +33,8 @@ Runtime settings live in `config.json` next to `ov_server.py`. The server starts
 
 Models are auto-discovered: any subdirectory of `models_dir` that contains both `openvino_model.xml` and `generation_config.json` is registered as an LLM.
 
+For model conversion, adding new models, and VRAM sizing — see **[MODELS.md](MODELS.md)**.
+
 ## Logs
 
 Logs go to the system journal. To follow live:

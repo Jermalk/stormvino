@@ -147,6 +147,7 @@ For every issue, complete this sequence before writing a fix:
 | `ov_server.py` | Single-file server — keep it that way unless a module exceeds ~200 lines of distinct concern |
 | `config.json` | Runtime config: models_dir, device, model names, limits. Server falls back to defaults if absent. |
 | `README.md` | User-facing commands: start, logs, debug toggle, network access, health/model checks |
+| `MODELS.md` | Model conversion guide, directory layout, VRAM sizing, adding/removing models |
 | `DECISIONS.md` | Architectural choices with rationale |
 | `PROGRESS.md` | Completed steps, current state, next actions |
 

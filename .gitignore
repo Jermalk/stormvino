@@ -2,7 +2,11 @@
 __pycache__/
 *.py[cod]
 
-# model cache
+# OpenVINO model binaries — large files, not tracked in git
+# Model directories live in models/ and are managed separately (see MODELS.md)
+models/
+
+# OpenVINO compile cache (ephemeral, machine-specific)
 /tmp/ov_cache*/
 
 # environment files

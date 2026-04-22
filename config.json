@@ -1,5 +1,5 @@
 {
-    "models_dir":             "/home/jerzy/ov_models",
+    "models_dir":             "/opt/ov_server/models",
     "device":                 "GPU.1",
     "ov_cache_dir":           "/tmp/ov_cache_b60",
     "default_model":          "qwen3-14b-int4",
