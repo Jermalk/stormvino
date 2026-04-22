@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import openvino_genai as ov_genai
 from optimum.intel import OVModelForFeatureExtraction
 from transformers import AutoTokenizer
@@ -91,22 +91,58 @@ def check_memory():
 
 
 # ---------------------------------------------------------------------------
-# ChatML prompt builder — Qwen3 native format
+# Prompt builder — uses tokenizer's Jinja template so tools are formatted
+# correctly by the model's own template (Qwen3 knows its tool call format).
 # ---------------------------------------------------------------------------
-def build_chatml(messages: List, add_default_system: bool = True, thinking: bool = True) -> str:
-    parts = []
+def build_prompt(messages: List, tokenizer: AutoTokenizer,
+                 tools: Optional[List[Dict[str, Any]]] = None,
+                 thinking: bool = True) -> str:
+    suffix = " /no_think" if not thinking else ""
+    msg_dicts = []
     has_system = any(m.role == "system" for m in messages)
-    suffix = "" if thinking else " /no_think"
-    if add_default_system and not has_system:
-        parts.append(f"<|im_start|>system\nYou are a helpful assistant.{suffix}<|im_end|>")
+    if not has_system:
+        msg_dicts.append({"role": "system", "content": f"You are a helpful assistant.{suffix}"})
     for m in messages:
-        # inject /no_think into existing system message if thinking disabled
-        content = m.content
-        if m.role == "system" and not thinking and not content.endswith("/no_think"):
-            content = content.rstrip() + suffix
-        parts.append(f"<|im_start|>{m.role}\n{content}<|im_end|>")
-    parts.append("<|im_start|>assistant\n")
-    return "\n".join(parts)
+        d: Dict[str, Any] = {"role": m.role, "content": m.content}
+        if m.role == "system" and not thinking and not m.content.endswith("/no_think"):
+            d["content"] = m.content.rstrip() + suffix
+        if m.tool_call_id:
+            d["tool_call_id"] = m.tool_call_id
+        if m.name:
+            d["name"] = m.name
+        msg_dicts.append(d)
+    return tokenizer.apply_chat_template(
+        msg_dicts,
+        tools=tools,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tool call parser — extracts <tool_call>…</tool_call> blocks from output
+# ---------------------------------------------------------------------------
+def parse_tool_calls(text: str):
+    pattern = r'<tool_call>\s*(.*?)\s*</tool_call>'
+    matches = re.findall(pattern, text, re.DOTALL)
+    if not matches:
+        return None, text
+    tool_calls = []
+    for m in matches:
+        try:
+            data = json.loads(m)
+            tool_calls.append({
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": data["name"],
+                    "arguments": json.dumps(data.get("arguments", {})),
+                },
+            })
+        except (json.JSONDecodeError, KeyError):
+            log.warning(f"Failed to parse tool_call JSON: {m[:100]}")
+    remaining = re.sub(pattern, '', text, flags=re.DOTALL).strip()
+    return (tool_calls or None), remaining
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +236,7 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
             loaded_tokenizers.clear()
             log.info(f"Loading {model_id}...")
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 pipe = await loop.run_in_executor(
                     None,
                     partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE, **CONFIG)
@@ -224,7 +260,7 @@ async def get_embedding_model():
         if emb_model is None:
             check_memory()
             log.info("Loading embedding model...")
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             emb_model = await loop.run_in_executor(
                 None,
                 partial(OVModelForFeatureExtraction.from_pretrained, EMBEDDING_MODEL_PATH)
@@ -243,6 +279,8 @@ async def get_embedding_model():
 class Message(BaseModel):
     role: str
     content: str
+    tool_call_id: Optional[str] = None
+    name: Optional[str] = None
 
 class ChatRequest(BaseModel):
     model: str = "qwen2.5-3b-int4"
@@ -251,6 +289,7 @@ class ChatRequest(BaseModel):
     temperature: Optional[float] = 0.7
     stream: Optional[bool] = False
     thinking: Optional[bool] = True   # False → appends /no_think to system prompt
+    tools: Optional[List[Dict[str, Any]]] = None
 
 class EmbeddingRequest(BaseModel):
     model: str = EMBEDDING_MODEL_ID
@@ -293,7 +332,7 @@ async def chat(req: ChatRequest):
     pipe = await get_model(req.model)
     tokenizer = loaded_tokenizers[req.model]
 
-    prompt = build_chatml(req.messages, thinking=req.thinking)
+    prompt = build_prompt(req.messages, tokenizer, tools=req.tools, thinking=req.thinking)
 
     gen_config = ov_genai.GenerationConfig()
     gen_config.max_new_tokens = req.max_tokens
@@ -309,9 +348,9 @@ async def chat(req: ChatRequest):
     # --- Streaming ---
     if req.stream:
         queue: asyncio.Queue = asyncio.Queue()
-        loop = asyncio.get_event_loop()                        # captured here, in async context
+        loop = asyncio.get_running_loop()
         ov_tokenizer = pipe.get_tokenizer()
-        streamer = AsyncTokenStreamer(ov_tokenizer, queue, loop)  # passed to streamer
+        streamer = AsyncTokenStreamer(ov_tokenizer, queue, loop)
 
         async def run_generation():
             await loop.run_in_executor(
@@ -319,8 +358,9 @@ async def chat(req: ChatRequest):
                 partial(pipe.generate, prompt, gen_config, streamer)
             )
 
+        chunk_id = uuid.uuid4().hex[:8]
+
         async def token_generator():
-            chunk_id = uuid.uuid4().hex[:8]
             gen_task = asyncio.create_task(run_generation())
             completion_tokens = 0
             start = time.time()
@@ -356,7 +396,7 @@ async def chat(req: ChatRequest):
                 stats.busy             = False
 
         finish_chunk = json.dumps({
-            "id": f"chatcmpl-x",
+            "id": f"chatcmpl-{chunk_id}",
             "object": "chat.completion.chunk",
             "model": req.model,
             "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
@@ -373,7 +413,7 @@ async def chat(req: ChatRequest):
     # --- Non-streaming ---
     try:
         start = time.time()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         raw = await loop.run_in_executor(None, partial(pipe.generate, prompt, gen_config))
         elapsed = time.time() - start
 
@@ -382,11 +422,18 @@ async def chat(req: ChatRequest):
         log.info(f"Raw generate() type={type(raw).__name__!r} text_len={len(raw_text)}")
 
         thinking, answer = extract_thinking(raw_text)
-        full_response = format_thinking(thinking, answer)
+        tool_calls, answer = parse_tool_calls(answer)
 
-        completion_tokens = len(tokenizer.encode(full_response))
+        if tool_calls:
+            message = {"role": "assistant", "content": None, "tool_calls": tool_calls}
+            finish_reason = "tool_calls"
+        else:
+            message = {"role": "assistant", "content": format_thinking(thinking, answer)}
+            finish_reason = "stop"
+
+        completion_tokens = len(tokenizer.encode(answer or ""))
         tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
-        log.info(f"{req.model}: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
+        log.info(f"{req.model}: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s | finish={finish_reason}")
 
         stats.last_model       = req.model
         stats.last_tokens      = completion_tokens
@@ -403,8 +450,8 @@ async def chat(req: ChatRequest):
         "model": req.model,
         "choices": [{
             "index": 0,
-            "message": {"role": "assistant", "content": full_response},
-            "finish_reason": "stop"
+            "message": message,
+            "finish_reason": finish_reason,
         }],
         "usage": {
             "prompt_tokens":     prompt_tokens,
@@ -419,7 +466,7 @@ async def embeddings(req: EmbeddingRequest):
     model, tok = await get_embedding_model()
     texts = [req.input] if isinstance(req.input, str) else req.input
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _embed():
         inputs = tok(texts, return_tensors="pt", padding=True, truncation=True, max_length=512)
