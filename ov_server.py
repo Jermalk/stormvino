@@ -234,9 +234,6 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
     async with _model_lock:
         if model_id not in loaded_models:
             check_memory()
-            log.info("Unloading previous models to free VRAM...")
-            loaded_models.clear()
-            loaded_tokenizers.clear()
             log.info(f"Loading {model_id}...")
             try:
                 loop = asyncio.get_running_loop()
