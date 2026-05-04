@@ -28,7 +28,7 @@ source /home/jerzy/ov_env/bin/activate && python3 -m pytest tests/ -v
 ### 2026-05-04 — Restart server
 
 ```bash
-sudo systemctl restart ov-server && sleep 3 && curl -s http://localhost:11435/health | python3 -m json.tool
+sudo systemctl restart ov-server && sleep 8 && curl -s http://localhost:11435/health | python3 -m json.tool
 ```
 
 ### 2026-05-04 — F1: Test scheduler_config kwarg vs config-dict forms
@@ -64,7 +64,7 @@ curl -s http://localhost:11435/v1/messages/count_tokens -H "Content-Type: applic
 ### 2026-05-04 — Restart after streaming bug fix (create_task coroutine fix)
 
 ```bash
-sudo systemctl restart ov-server && sleep 3 && curl -s http://localhost:11435/health | python3 -m json.tool
+sudo systemctl restart ov-server && sleep 8 && curl -s http://localhost:11435/health | python3 -m json.tool
 ```
 
 ### 2026-05-04 — Streaming retest after fix

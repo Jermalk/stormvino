@@ -106,6 +106,8 @@ Goal: Claude Code can point `ANTHROPIC_BASE_URL=http://localhost:11435` and get 
 
 **Phase 1 gate:** Point Claude Code at `ANTHROPIC_BASE_URL=http://localhost:11435`. Single round-trip must succeed before Phase 2 starts.
 
+**Phase 1 live results (2026-05-04):** Non-streaming shape ✓ · active_requests returns to 0 ✓ · full SSE sequence ✓ · count_tokens ✓. Bug found and fixed: `create_task()` requires coroutine not Future (commit 50d4717). Known: empty `<think></think>` tags leak into stream deltas — pre-existing, logged in Deferred.
+
 ---
 
 ### Step 5 — `/v1/messages/count_tokens` `[x]`
