@@ -87,6 +87,7 @@ def _load_config() -> dict:
         "max_new_tokens_agent":  200,
         "vlm_max_image_turns":   1,     # keep images only from the last N user turns
         "vlm_max_image_side_px": 1280,  # resize images so longest side ≤ this value
+        "kv_cache_size_gb":      8,     # dedicated paged KV cache budget for LLMPipeline
     }
     if _CONFIG_FILE.exists():
         try:
@@ -141,6 +142,12 @@ CONFIG             = {
     "KV_CACHE_PRECISION":              "u8",
     "DYNAMIC_QUANTIZATION_GROUP_SIZE": "32",
 }
+def get_scheduler_config() -> ov_genai.SchedulerConfig:
+    sched = ov_genai.SchedulerConfig()
+    sched.cache_size = _cfg.get("kv_cache_size_gb", 8)
+    return sched
+
+
 MAX_RAM_PERCENT    = _cfg["max_ram_percent"]
 MAX_NEW_TOKENS_DEFAULT = _cfg["max_new_tokens_default"]
 MAX_NEW_TOKENS_AGENT   = _cfg["max_new_tokens_agent"]
@@ -544,7 +551,8 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
             loop = asyncio.get_running_loop()
             pipe = await loop.run_in_executor(
                 None,
-                partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE, **CONFIG)
+                partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
+                        scheduler_config=get_scheduler_config(), **CONFIG)
             )
             tokenizer = await loop.run_in_executor(
                 None,
