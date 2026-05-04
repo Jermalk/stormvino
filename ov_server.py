@@ -1,9 +1,10 @@
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 import openvino_genai as ov_genai
 from optimum.intel import OVModelForFeatureExtraction
 from transformers import AutoProcessor, AutoTokenizer
+from abc import ABC, abstractmethod
 import base64, io, urllib.request
 import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal, ctypes
 from PIL import Image
@@ -1109,6 +1110,36 @@ async def _local_complete(req: AnthropicRequest) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Backend ABC — abstracts local vs. remote inference for /v1/messages
+# ---------------------------------------------------------------------------
+class Backend(ABC):
+    @abstractmethod
+    async def complete(self, req: AnthropicRequest) -> dict: ...
+
+    @abstractmethod
+    async def prepare_stream(self, req: AnthropicRequest) -> AsyncGenerator[str, None]: ...
+
+
+class LocalBackend(Backend):
+    async def complete(self, req: AnthropicRequest) -> dict:
+        return await _local_complete(req)
+
+    async def prepare_stream(self, req: AnthropicRequest) -> AsyncGenerator[str, None]:
+        pipe      = await get_model(req.model)
+        model_id  = next(k for k in loaded_models if loaded_models[k] is pipe)
+        tokenizer = loaded_tokenizers[model_id]
+        messages  = _anthropic_to_messages(req)
+        thinking  = _resolve_thinking(req.thinking)
+        prompt    = build_prompt(messages, tokenizer, tools=req.tools, thinking=thinking)
+        gen_config    = _build_gen_config(req)
+        prompt_tokens = len(tokenizer.encode(prompt))
+        return _anthropic_stream(pipe, model_id, prompt, gen_config, prompt_tokens)
+
+
+_backend: Backend = LocalBackend()
+
+
 @app.post("/v1/messages")
 async def anthropic_messages(req: AnthropicRequest):
     log.info(f"[/v1/messages] model={req.model!r} stream={req.stream}")
@@ -1116,28 +1147,17 @@ async def anthropic_messages(req: AnthropicRequest):
     stats.total_requests  += 1
 
     if req.stream:
-        # Set up prompt before returning StreamingResponse so setup errors
-        # (bad model, OOM) are caught here and decrement active_requests.
+        # prepare_stream() does all setup; errors here catch before any SSE yield.
         try:
-            pipe = await get_model(req.model)
-            model_id  = next(k for k in loaded_models if loaded_models[k] is pipe)
-            tokenizer = loaded_tokenizers[model_id]
-            messages  = _anthropic_to_messages(req)
-            thinking  = _resolve_thinking(req.thinking)
-            prompt    = build_prompt(messages, tokenizer, tools=req.tools, thinking=thinking)
-            gen_config    = _build_gen_config(req)
-            prompt_tokens = len(tokenizer.encode(prompt))
+            gen = await _backend.prepare_stream(req)
         except Exception:
             stats.active_requests -= 1
             raise
         # _anthropic_stream() owns the active_requests decrement from here.
-        return StreamingResponse(
-            _anthropic_stream(pipe, model_id, prompt, gen_config, prompt_tokens),
-            media_type="text/event-stream",
-        )
+        return StreamingResponse(gen, media_type="text/event-stream")
 
     try:
-        return await _local_complete(req)
+        return await _backend.complete(req)
     finally:
         stats.active_requests -= 1
 
