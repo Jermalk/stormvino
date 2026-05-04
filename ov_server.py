@@ -1142,9 +1142,143 @@ class LocalBackend(Backend):
         return _anthropic_stream(pipe, model_id, prompt, gen_config, prompt_tokens)
 
 
+class OpenAICompatBackend(Backend):
+    """Proxies /v1/messages to any OpenAI-compatible endpoint (OVH, vLLM, etc.)."""
+
+    def __init__(self, base_url: str, api_key: str, model: str) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._api_key  = api_key
+        self._model    = model
+
+    def _headers(self) -> Dict[str, str]:
+        return {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
+
+    def _openai_body(self, req: AnthropicRequest, stream: bool) -> Dict[str, Any]:
+        messages = _anthropic_to_messages(req)
+        return {
+            "model":       self._model,
+            "messages":    [{"role": m.role, "content": _text_content(m)} for m in messages],
+            "max_tokens":  req.max_tokens or MAX_NEW_TOKENS_DEFAULT,
+            "temperature": req.temperature if req.temperature is not None else 0.6,
+            "stream":      stream,
+        }
+
+    async def complete(self, req: AnthropicRequest) -> dict:
+        import httpx
+        body = self._openai_body(req, stream=False)
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{self._base_url}/chat/completions", json=body, headers=self._headers()
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        choice = data["choices"][0]
+        raw    = choice["message"].get("content") or ""
+        usage  = data.get("usage", {})
+        stop   = choice.get("finish_reason", "stop")
+
+        thinking_txt, answer = extract_thinking(raw)
+        tool_calls, answer   = parse_tool_calls(answer)
+        log.info(f"[ovh] {self._model}: {usage.get('completion_tokens', '?')} tok")
+
+        content_blocks: List[Dict[str, Any]] = []
+        if thinking_txt:
+            content_blocks.append({"type": "thinking", "thinking": thinking_txt})
+        if tool_calls:
+            for tc in tool_calls:
+                content_blocks.append({
+                    "type":  "tool_use",
+                    "id":    tc["id"],
+                    "name":  tc["function"]["name"],
+                    "input": json.loads(tc["function"]["arguments"]),
+                })
+            stop_reason = "tool_use"
+        else:
+            content_blocks.append({"type": "text", "text": answer or ""})
+            stop_reason = "end_turn" if stop == "stop" else stop
+
+        return {
+            "id":            f"msg_{uuid.uuid4().hex}",
+            "type":          "message",
+            "role":          "assistant",
+            "model":         self._model,
+            "content":       content_blocks,
+            "stop_reason":   stop_reason,
+            "stop_sequence": None,
+            "usage": {
+                "input_tokens":  usage.get("prompt_tokens", 0),
+                "output_tokens": usage.get("completion_tokens", 0),
+            },
+        }
+
+    async def prepare_stream(self, req: AnthropicRequest) -> AsyncGenerator[str, None]:
+        return self._stream_gen(self._openai_body(req, stream=True))
+
+    async def _stream_gen(self, body: Dict[str, Any]) -> AsyncGenerator[str, None]:
+        import httpx
+        msg_id = f"msg_{uuid.uuid4().hex}"
+        yield (
+            f"event: message_start\n"
+            f"data: {json.dumps({'type': 'message_start', 'message': {'id': msg_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': self._model, 'stop_reason': None, 'usage': {'input_tokens': 0, 'output_tokens': 1}}})}\n\n"
+        )
+        yield (
+            f"event: content_block_start\n"
+            f"data: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
+        )
+        yield "event: ping\ndata: {\"type\":\"ping\"}\n\n"
+
+        completion_tokens = 0
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            async with client.stream(
+                "POST", f"{self._base_url}/chat/completions",
+                json=body, headers=self._headers(),
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    payload = line[6:]
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                    except json.JSONDecodeError:
+                        continue
+                    text = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
+                    if text:
+                        completion_tokens += 1
+                        yield (
+                            f"event: content_block_delta\n"
+                            f"data: {json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': text}})}\n\n"
+                        )
+
+        log.info(f"[ovh stream] {self._model}: ~{completion_tokens} chunks")
+        yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
+        yield (
+            f"event: message_delta\n"
+            f"data: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': {'output_tokens': completion_tokens}})}\n\n"
+        )
+        yield "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+
 def _build_backends() -> Dict[str, Backend]:
-    """Instantiate backend objects declared in config routing section."""
-    return {"local": LocalBackend()}
+    """Instantiate backend objects from config routing.backends; local is always present."""
+    result: Dict[str, Backend] = {"local": LocalBackend()}
+    for name, spec in _cfg.get("routing", {}).get("backends", {}).items():
+        if spec.get("type") == "openai_compat":
+            env_name = spec.get("api_key_env", "")
+            api_key  = os.environ.get(env_name, "")
+            if not api_key:
+                log.warning(f"Backend '{name}': env var '{env_name}' not set — skipping")
+                continue
+            result[name] = OpenAICompatBackend(
+                base_url=spec["base_url"],
+                api_key=api_key,
+                model=spec.get("model", ""),
+            )
+            log.info(f"Backend '{name}' registered (openai_compat → {spec['base_url']})")
+    return result
 
 
 _backends: Dict[str, Backend] = _build_backends()

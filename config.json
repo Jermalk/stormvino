@@ -16,7 +16,17 @@
     },
     "routing": {
         "default":   "local",
-        "model_map": {}
+        "model_map": {
+            "claude-opus-4-7": "ovh"
+        },
+        "backends": {
+            "ovh": {
+                "type":        "openai_compat",
+                "base_url":    "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+                "api_key_env": "OVH_API_KEY",
+                "model":       "Qwen3-32B"
+            }
+        }
     },
     "max_loaded_models":      2,
     "vram_headroom_gb":       1.5,
