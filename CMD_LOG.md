@@ -104,3 +104,15 @@ source /home/jerzy/ov_env/bin/activate && python -m pytest tests/ -q
 systemctl restart ov-server
 sleep 5 && curl -s http://localhost:11435/health | python3 -m json.tool
 ```
+
+### 2026-05-04 — Restart + re-enable debug logging
+```sh
+systemctl restart ov-server
+sleep 4 && kill -USR1 $(systemctl show ov-server --property=MainPID --value)
+```
+
+### 2026-05-04 — Restart + re-enable debug after _extract_agent_json fix
+```sh
+systemctl restart ov-server
+sleep 4 && kill -USR1 $(systemctl show ov-server --property=MainPID --value)
+```

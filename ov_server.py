@@ -427,6 +427,31 @@ def build_prompt(messages: List, tokenizer: AutoTokenizer,
 
 
 # ---------------------------------------------------------------------------
+# AnythingLLM agent JSON extractor
+# The model may wrap its tool-selection JSON in prose. This scans for the
+# first valid {"name":..., "arguments":...} object and returns it clean.
+# Returns "" when no tool JSON is found so the caller can signal "no tool".
+# ---------------------------------------------------------------------------
+_agent_json_decoder = json.JSONDecoder()
+
+
+def _extract_agent_json(text: str) -> str:
+    pos = 0
+    while pos < len(text):
+        start = text.find('{', pos)
+        if start == -1:
+            break
+        try:
+            obj, _ = _agent_json_decoder.raw_decode(text, start)
+            if isinstance(obj, dict) and "name" in obj and "arguments" in obj:
+                return json.dumps(obj)
+        except json.JSONDecodeError:
+            pass
+        pos = start + 1
+    return ""
+
+
+# ---------------------------------------------------------------------------
 # Tool call parser — extracts <tool_call>…</tool_call> blocks from output
 # ---------------------------------------------------------------------------
 def parse_tool_calls(text: str):
@@ -933,8 +958,21 @@ async def chat(req: ChatRequest):
                     )
                 raw_text = decode_result(raw)
                 elapsed = time.time() - start
+                if debug_logging:
+                    log.info(f"[DEBUG] agent raw output:\n{raw_text[:2000]}")
                 _, answer = extract_thinking(raw_text)
                 tool_calls, answer = parse_tool_calls(answer)
+
+                # AnythingLLM system-prompt style: model outputs plain JSON,
+                # possibly with surrounding prose. Extract it; return "" when
+                # no tool JSON is found so AnythingLLM falls back to 14b fast.
+                if not tool_calls:
+                    answer = _extract_agent_json(answer)
+                    if answer:
+                        log.info(f"{model_id} [agent]: tool JSON extracted")
+                    else:
+                        log.info(f"{model_id} [agent]: no tool selected — returning empty")
+
                 completion_tokens = len(tokenizer.encode(answer or ""))
                 tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
                 log.info(
