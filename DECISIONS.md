@@ -47,6 +47,24 @@
 **Rejected alternative:** Always require a token — would break existing integrations that never needed auth.
 **Affects:** ov_server.py — verify_token(), /v1/messages, /v1/messages/count_tokens
 
+### 2026-05-04 — _RequestIDFilter + ContextVar for per-request log correlation
+**Decision:** Use a `contextvars.ContextVar[str]` set by `RequestIDMiddleware` and injected into every log record by `_RequestIDFilter`; format changed to include `[request_id]`.
+**Rationale:** ContextVar is async-safe and propagates correctly through `run_in_executor` worker threads; no lock needed; startup lines default to `[-]` making them visually distinct from request traffic.
+**Rejected alternative:** Thread-local storage — broken for async; logging extra dict per call — would require changing every log.info() call site.
+**Affects:** ov_server.py — logging setup, RequestIDMiddleware, _RequestIDFilter
+
+### 2026-05-04 — RequestIDMiddleware registered last (outermost)
+**Decision:** In `__main__`, `app.add_middleware(RequestIDMiddleware)` is called after CORSMiddleware so it is the outermost layer and sets the ContextVar before any other middleware can log.
+**Rationale:** Starlette builds middleware as a stack — last added is outermost; RequestID must be set first so even DebugLoggingMiddleware sees the correct ID in its log lines.
+**Rejected alternative:** Register first — would be innermost, missing all middleware-level log lines.
+**Affects:** ov_server.py — __main__ middleware registration order
+
+### 2026-05-04 — Hashtag routing via override file (designed, not yet implemented)
+**Decision:** `#use-local-box` / `#use-ovh` / `#use-uncle-a` in the user prompt triggers a Claude Code `UserPromptSubmit` hook that writes `/tmp/ov_routing_override.json` with `backend`, `fallback`, and `expires` (TTL 300 s); `_pick_backend()` reads this file before normal routing logic.
+**Rationale:** File-based IPC is simple, requires no server API changes beyond a 15-line patch, survives process restarts, and the TTL prevents stale overrides from affecting unrelated sessions.
+**Rejected alternative:** HTTP sidecar endpoint to set routing — more complex; env-var injection from hook — hooks cannot mutate the Claude Code process environment.
+**Affects:** ov_server.py — _pick_backend(); ~/.claude/hooks/route-selector.sh (new); ~/.claude/settings.json
+
 ### 2026-05-04 — Adopted session management framework
 **Decision:** Merged LLM session management framework (re-entry protocol, KYE/SBS/AEC/OMK/YNC rules, context discipline, session-wrap) into project CLAUDE.md.
 **Rationale:** Framework was proven in another project; centralises session discipline so Claude Code behaves consistently across restarts without re-explanation.

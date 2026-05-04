@@ -45,11 +45,21 @@
 
 ---
 
+### 2026-05-04 — Session 5 (7aebc3c)
+**Working on:** Documentation — CLAUDE_CODE_INTEGRATION.md + hashtag routing design
+**Last commit:** 7aebc3c — docs: CLAUDE_CODE_INTEGRATION.md — setup guide + hashtag routing design
+**Next action:** Implement hashtag routing — server patch in _pick_backend() + hook script (plan in SCRATCHPAD.md)
+**Blocked on:** nothing (Step 10 still deferred until ANTHROPIC_API_KEY available)
+**Open questions:** none
+**Tests:** pass (32/32)
+
+---
+
 ## NOW
 
-**Working on:** All planned steps complete (1–9, 11–15); Step 10 deferred
-**Last commit:** 25eb181 — feat: Step 15 — RequestIDMiddleware + per-request log correlation
-**Next action:** Step 10 — AnthropicBackend in ov_server.py (requires ANTHROPIC_API_KEY env var)
-**Blocked on:** User needs ANTHROPIC_API_KEY to proceed with Step 10
-**Open questions:** none
+**Working on:** Hashtag routing implementation
+**Last commit:** 7aebc3c — docs: CLAUDE_CODE_INTEGRATION.md — setup guide + hashtag routing design
+**Next action:** Server patch — top of `_pick_backend()` in ov_server.py; then create `~/.claude/hooks/route-selector.sh`; code in CLAUDE_CODE_INTEGRATION.md §3a–§3b
+**Blocked on:** nothing
+**Open questions:** Step 10 (AnthropicBackend) deferred until ANTHROPIC_API_KEY available
 **Tests:** pass (32/32)
