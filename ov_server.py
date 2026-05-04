@@ -916,6 +916,65 @@ async def chat(req: ChatRequest):
     stats.active_requests += 1
     stats.total_requests += 1
 
+    # --- Agent streaming: buffer internally, strip <think>, emit as single chunk ---
+    # Agent responses are short JSON (≤ ~100 tokens) so buffering is safe.
+    # Streaming raw tokens would expose <think> blocks to clients like AnythingLLM
+    # that parse the content as JSON and break on unexpected text.
+    if req.stream and is_agent:
+        chunk_id = uuid.uuid4().hex[:8]
+        loop = asyncio.get_running_loop()
+
+        async def agent_stream():
+            start = time.time()
+            try:
+                async with _infer_lock(model_id):
+                    raw = await loop.run_in_executor(
+                        None, partial(pipe.generate, prompt, gen_config)
+                    )
+                raw_text = decode_result(raw)
+                elapsed = time.time() - start
+                _, answer = extract_thinking(raw_text)
+                tool_calls, answer = parse_tool_calls(answer)
+                completion_tokens = len(tokenizer.encode(answer or ""))
+                tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
+                log.info(
+                    f"{model_id} [agent]: {completion_tokens} tokens in {elapsed:.1f}s"
+                    f" = {tok_per_sec:.1f} tok/s"
+                )
+                stats.last_model       = model_id
+                stats.last_tokens      = completion_tokens
+                stats.last_elapsed     = elapsed
+                stats.last_tok_per_sec = tok_per_sec
+                stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                stats.total_tokens    += completion_tokens
+
+                if tool_calls:
+                    delta = {"tool_calls": tool_calls}
+                    finish_reason = "tool_calls"
+                else:
+                    delta = {"content": answer}
+                    finish_reason = "stop"
+
+                content_chunk = json.dumps({
+                    "id": f"chatcmpl-{chunk_id}",
+                    "object": "chat.completion.chunk",
+                    "model": model_id,
+                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                })
+                finish_chunk = json.dumps({
+                    "id": f"chatcmpl-{chunk_id}",
+                    "object": "chat.completion.chunk",
+                    "model": model_id,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+                })
+                yield f"data: {content_chunk}\n\n"
+                yield f"data: {finish_chunk}\n\n"
+                yield "data: [DONE]\n\n"
+            finally:
+                stats.active_requests -= 1
+
+        return StreamingResponse(agent_stream(), media_type="text/event-stream")
+
     # --- Streaming ---
     if req.stream:
         queue: asyncio.Queue = asyncio.Queue()

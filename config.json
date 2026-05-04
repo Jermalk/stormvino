@@ -32,7 +32,7 @@
     "vram_headroom_gb":       1.5,
     "max_ram_percent":        75.0,
     "max_new_tokens_default": 2048,
-    "max_new_tokens_agent":   200,
+    "max_new_tokens_agent":   500,
     "vlm_max_image_turns":    1,
     "vlm_max_image_side_px":  1280
 }

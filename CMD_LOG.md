@@ -78,3 +78,29 @@ curl -sN --max-time 60 http://localhost:11435/v1/messages -H "Content-Type: appl
 ```bash
 ANTHROPIC_BASE_URL=http://localhost:11435 ANTHROPIC_API_KEY=local claude
 ```
+
+### 2026-05-04 — Check debug_logging state
+```sh
+grep -n "debug_logging" /opt/ov_server/ov_server.py | head -5
+```
+
+### 2026-05-04 — Enable debug logging via SIGUSR1
+```sh
+kill -USR1 $(systemctl show ov-server --property=MainPID --value)
+```
+
+### 2026-05-04 — Watch live server log (agentic request capture)
+```sh
+journalctl -u ov-server -f --output=cat
+```
+
+### 2026-05-04 — Run tests after agent-stream fix
+```sh
+source /home/jerzy/ov_env/bin/activate && python -m pytest tests/ -q
+```
+
+### 2026-05-04 — Restart service + health check
+```sh
+systemctl restart ov-server
+sleep 5 && curl -s http://localhost:11435/health | python3 -m json.tool
+```
