@@ -25,11 +25,21 @@
 
 ---
 
+### 2026-05-04 — Session 3 (fd5ff47)
+**Working on:** Phase 2 (Steps 6–8), Phase 3 (Steps 11–12), Phase 4 (Steps 13–14) — all complete
+**Last commit:** fd5ff47 — feat: Step 14 — CORSMiddleware allow all origins
+**Next action:** Step 15 — _RequestIDFilter + RequestIDMiddleware
+**Blocked on:** nothing
+**Open questions:** Step 10 (AnthropicBackend) deferred until user has ANTHROPIC_API_KEY
+**Tests:** pass (32/32)
+
+---
+
 ## NOW
 
-**Working on:** Phase 2 — request router (Step 6: Backend ABC + LocalBackend)
-**Last commit:** f2da4f4 — docs: session state checkpoint
-**Next action:** Step 6 — add `from abc import ABC, abstractmethod` + `AsyncGenerator` to typing imports; add Backend ABC + LocalBackend class; refactor anthropic_messages() to dispatch through LocalBackend
+**Working on:** Phase 4 — Step 15 (Request ID observability)
+**Last commit:** fd5ff47 — feat: Step 14 — CORSMiddleware allow all origins
+**Next action:** Step 15 — _RequestIDFilter + RequestIDMiddleware; attach to logger before basicConfig; register in __main__; uvicorn access_log=False
 **Blocked on:** nothing
-**Open questions:** Steps 9/10 gated on OVH_API_KEY / ANTHROPIC_API_KEY
+**Open questions:** Step 10 (AnthropicBackend) deferred until user has ANTHROPIC_API_KEY
 **Tests:** pass (32/32)
