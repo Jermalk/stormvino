@@ -79,7 +79,7 @@ Goal: Claude Code can point `ANTHROPIC_BASE_URL=http://localhost:11435` and get 
 
 ---
 
-### Step 3 — `_anthropic_stream()` generator `[ ]`
+### Step 3 — `_anthropic_stream()` generator `[x]`
 
 **Scope:** New standalone async generator function. No modifications to existing `token_generator()` or `AsyncTokenStreamer`.
 
@@ -92,7 +92,7 @@ Goal: Claude Code can point `ANTHROPIC_BASE_URL=http://localhost:11435` and get 
 
 ---
 
-### Step 4 — `/v1/messages` route, local-only `[ ]`
+### Step 4 — `/v1/messages` route, local-only `[x]`
 
 **Scope:** New route only. No router yet — calls local inference directly. Existing `/v1/chat/completions` not touched.
 
@@ -108,7 +108,7 @@ Goal: Claude Code can point `ANTHROPIC_BASE_URL=http://localhost:11435` and get 
 
 ---
 
-### Step 5 — `/v1/messages/count_tokens` `[ ]`
+### Step 5 — `/v1/messages/count_tokens` `[x]`
 
 **Scope:** New route only.
 

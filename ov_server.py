@@ -975,6 +975,182 @@ async def chat(req: ChatRequest):
     }
 
 
+# ---------------------------------------------------------------------------
+# Anthropic /v1/messages — Steps 3, 4, 5
+# ---------------------------------------------------------------------------
+
+async def _anthropic_stream(
+    pipe: ov_genai.LLMPipeline,
+    model_id: str,
+    prompt: str,
+    gen_config: ov_genai.GenerationConfig,
+    prompt_tokens: int,
+):
+    """Anthropic SSE event sequence. Decrements stats.active_requests in finally."""
+    msg_id = f"msg_{uuid.uuid4().hex}"
+
+    yield (
+        f"event: message_start\n"
+        f"data: {json.dumps({'type': 'message_start', 'message': {'id': msg_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': model_id, 'stop_reason': None, 'usage': {'input_tokens': prompt_tokens, 'output_tokens': 1}}})}\n\n"
+    )
+    yield (
+        f"event: content_block_start\n"
+        f"data: {json.dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
+    )
+    yield "event: ping\ndata: {\"type\":\"ping\"}\n\n"
+
+    queue: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    streamer = AsyncTokenStreamer(pipe.get_tokenizer(), queue, loop)
+
+    lock = _infer_lock(model_id)
+    await lock.acquire()
+    gen_task = asyncio.create_task(
+        loop.run_in_executor(None, partial(pipe.generate, prompt, gen_config, streamer))
+    )
+
+    completion_tokens = 0
+    start = time.time()
+    try:
+        while True:
+            token = await queue.get()
+            if token is None:
+                break
+            completion_tokens += 1
+            yield (
+                f"event: content_block_delta\n"
+                f"data: {json.dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': token}})}\n\n"
+            )
+    finally:
+        await gen_task
+        lock.release()
+        stats.active_requests -= 1
+        elapsed = time.time() - start
+        tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
+        log.info(f"{model_id} [anthropic stream]: {completion_tokens} tok in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
+        stats.last_model       = model_id
+        stats.last_tokens      = completion_tokens
+        stats.last_elapsed     = elapsed
+        stats.last_tok_per_sec = tok_per_sec
+        stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        stats.total_tokens    += completion_tokens
+
+    yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
+    yield (
+        f"event: message_delta\n"
+        f"data: {json.dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': {'output_tokens': completion_tokens}})}\n\n"
+    )
+    yield "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+
+async def _local_complete(req: AnthropicRequest) -> dict:
+    """Non-streaming Anthropic completion via local LLMPipeline."""
+    pipe = await get_model(req.model)
+    model_id = next(k for k in loaded_models if loaded_models[k] is pipe)
+    tokenizer = loaded_tokenizers[model_id]
+
+    messages  = _anthropic_to_messages(req)
+    thinking  = _resolve_thinking(req.thinking)
+    prompt    = build_prompt(messages, tokenizer, tools=req.tools, thinking=thinking)
+    prompt_tokens = len(tokenizer.encode(prompt))
+    gen_config    = _build_gen_config(req)
+
+    start = time.time()
+    loop  = asyncio.get_running_loop()
+    async with _infer_lock(model_id):
+        raw = await loop.run_in_executor(None, partial(pipe.generate, prompt, gen_config))
+    elapsed = time.time() - start
+
+    raw_text           = decode_result(raw)
+    thinking_txt, answer = extract_thinking(raw_text)
+    tool_calls, answer   = parse_tool_calls(answer)
+
+    completion_tokens = len(tokenizer.encode(answer or ""))
+    tok_per_sec       = completion_tokens / elapsed if elapsed > 0 else 0
+    log.info(f"{model_id} [anthropic]: {completion_tokens} tok {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
+
+    stats.last_model       = model_id
+    stats.last_tokens      = completion_tokens
+    stats.last_elapsed     = elapsed
+    stats.last_tok_per_sec = tok_per_sec
+    stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    stats.total_tokens    += completion_tokens
+
+    content_blocks: List[Dict[str, Any]] = []
+    if thinking_txt:
+        content_blocks.append({"type": "thinking", "thinking": thinking_txt})
+    if tool_calls:
+        for tc in tool_calls:
+            content_blocks.append({
+                "type":  "tool_use",
+                "id":    tc["id"],
+                "name":  tc["function"]["name"],
+                "input": json.loads(tc["function"]["arguments"]),
+            })
+        stop_reason = "tool_use"
+    else:
+        content_blocks.append({"type": "text", "text": answer or ""})
+        stop_reason = "end_turn"
+
+    return {
+        "id":            f"msg_{uuid.uuid4().hex}",
+        "type":          "message",
+        "role":          "assistant",
+        "model":         model_id,
+        "content":       content_blocks,
+        "stop_reason":   stop_reason,
+        "stop_sequence": None,
+        "usage": {
+            "input_tokens":  prompt_tokens,
+            "output_tokens": completion_tokens,
+        },
+    }
+
+
+@app.post("/v1/messages")
+async def anthropic_messages(req: AnthropicRequest):
+    log.info(f"[/v1/messages] model={req.model!r} stream={req.stream}")
+    stats.active_requests += 1
+    stats.total_requests  += 1
+
+    if req.stream:
+        # Set up prompt before returning StreamingResponse so setup errors
+        # (bad model, OOM) are caught here and decrement active_requests.
+        try:
+            pipe = await get_model(req.model)
+            model_id  = next(k for k in loaded_models if loaded_models[k] is pipe)
+            tokenizer = loaded_tokenizers[model_id]
+            messages  = _anthropic_to_messages(req)
+            thinking  = _resolve_thinking(req.thinking)
+            prompt    = build_prompt(messages, tokenizer, tools=req.tools, thinking=thinking)
+            gen_config    = _build_gen_config(req)
+            prompt_tokens = len(tokenizer.encode(prompt))
+        except Exception:
+            stats.active_requests -= 1
+            raise
+        # _anthropic_stream() owns the active_requests decrement from here.
+        return StreamingResponse(
+            _anthropic_stream(pipe, model_id, prompt, gen_config, prompt_tokens),
+            media_type="text/event-stream",
+        )
+
+    try:
+        return await _local_complete(req)
+    finally:
+        stats.active_requests -= 1
+
+
+@app.post("/v1/messages/count_tokens")
+async def anthropic_count_tokens(req: AnthropicRequest):
+    pipe      = await get_model(req.model)
+    model_id  = next(k for k in loaded_models if loaded_models[k] is pipe)
+    tokenizer = loaded_tokenizers[model_id]
+    messages  = _anthropic_to_messages(req)
+    prompt    = build_prompt(messages, tokenizer, tools=req.tools,
+                             thinking=_resolve_thinking(req.thinking))
+    return {"input_tokens": len(tokenizer.encode(prompt))}
+
+
 @app.post("/v1/embeddings")
 async def embeddings(req: EmbeddingRequest):
     model, tok = await get_embedding_model()
