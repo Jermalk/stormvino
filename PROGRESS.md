@@ -35,11 +35,21 @@
 
 ---
 
-## NOW
-
+### 2026-05-04 — Session 4 (25eb181)
 **Working on:** Phase 4 — Step 15 (Request ID observability)
-**Last commit:** fd5ff47 — feat: Step 14 — CORSMiddleware allow all origins
-**Next action:** Step 15 — _RequestIDFilter + RequestIDMiddleware; attach to logger before basicConfig; register in __main__; uvicorn access_log=False
+**Last commit:** 25eb181 — feat: Step 15 — RequestIDMiddleware + per-request log correlation
+**Next action:** Step 10 (AnthropicBackend) — needs ANTHROPIC_API_KEY from user, then implement in anthropic_layer.py or ov_server.py
 **Blocked on:** nothing
 **Open questions:** Step 10 (AnthropicBackend) deferred until user has ANTHROPIC_API_KEY
+**Tests:** pass (32/32)
+
+---
+
+## NOW
+
+**Working on:** All planned steps complete (1–9, 11–15); Step 10 deferred
+**Last commit:** 25eb181 — feat: Step 15 — RequestIDMiddleware + per-request log correlation
+**Next action:** Step 10 — AnthropicBackend in ov_server.py (requires ANTHROPIC_API_KEY env var)
+**Blocked on:** User needs ANTHROPIC_API_KEY to proceed with Step 10
+**Open questions:** none
 **Tests:** pass (32/32)
