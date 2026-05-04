@@ -135,7 +135,12 @@ def _discover_vlm_models(models_dir: Path) -> Dict[str, str]:
 
 MODELS_DIR         = Path(_cfg["models_dir"])
 DEVICE             = _cfg["device"]
-CONFIG             = {"PERFORMANCE_HINT": "LATENCY", "CACHE_DIR": _cfg["ov_cache_dir"]}
+CONFIG             = {
+    "PERFORMANCE_HINT":                "LATENCY",
+    "CACHE_DIR":                       _cfg["ov_cache_dir"],
+    "KV_CACHE_PRECISION":              "u8",
+    "DYNAMIC_QUANTIZATION_GROUP_SIZE": "32",
+}
 MAX_RAM_PERCENT    = _cfg["max_ram_percent"]
 MAX_NEW_TOKENS_DEFAULT = _cfg["max_new_tokens_default"]
 MAX_NEW_TOKENS_AGENT   = _cfg["max_new_tokens_agent"]
