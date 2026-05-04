@@ -676,6 +676,11 @@ async def health():
         "loaded_models":     list(loaded_models.keys()),
         "loaded_vlm_models": list(loaded_vlm_models.keys()),
         "embedding_loaded":  emb_model is not None,
+        "router": {
+            "default":   _cfg.get("routing", {}).get("default", "local"),
+            "backends":  list(_backends.keys()),
+            "model_map": _cfg.get("routing", {}).get("model_map", {}),
+        },
     }
 
 
