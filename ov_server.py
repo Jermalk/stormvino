@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 import json
 import numpy as np
 from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi.middleware.cors import CORSMiddleware
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger("ov_server")
@@ -1394,4 +1395,5 @@ if __name__ == "__main__":
         debug_logging = True
         log.info("Debug logging enabled (--debug flag)")
     app.add_middleware(DebugLoggingMiddleware)
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
     uvicorn.run(app, host="0.0.0.0", port=11435, workers=1, loop="asyncio")
