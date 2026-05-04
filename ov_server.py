@@ -6,7 +6,7 @@ from optimum.intel import OVModelForFeatureExtraction
 from transformers import AutoProcessor, AutoTokenizer
 from abc import ABC, abstractmethod
 import base64, io, urllib.request
-import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal, ctypes
+import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal, ctypes, contextvars
 from PIL import Image
 from pathlib import Path
 from functools import partial
@@ -19,7 +19,22 @@ import numpy as np
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+_request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
+
+
+class _RequestIDFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = _request_id_var.get()
+        return True
+
+
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(
+    logging.Formatter("%(asctime)s %(levelname)s [%(request_id)s] %(message)s")
+)
+_log_handler.addFilter(_RequestIDFilter())
+logging.root.addHandler(_log_handler)
+logging.root.setLevel(logging.INFO)
 log = logging.getLogger("ov_server")
 
 debug_logging: bool = False
@@ -30,6 +45,18 @@ def _toggle_debug(sig, frame):
     log.info(f"Debug logging {'enabled' if debug_logging else 'disabled'} (SIGUSR1)")
 
 signal.signal(signal.SIGUSR1, _toggle_debug)
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        req_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:12]
+        token = _request_id_var.set(req_id)
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = req_id
+            return response
+        finally:
+            _request_id_var.reset(token)
 
 
 class DebugLoggingMiddleware(BaseHTTPMiddleware):
@@ -1396,4 +1423,5 @@ if __name__ == "__main__":
         log.info("Debug logging enabled (--debug flag)")
     app.add_middleware(DebugLoggingMiddleware)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-    uvicorn.run(app, host="0.0.0.0", port=11435, workers=1, loop="asyncio")
+    app.add_middleware(RequestIDMiddleware)
+    uvicorn.run(app, host="0.0.0.0", port=11435, workers=1, loop="asyncio", access_log=False)
