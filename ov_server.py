@@ -477,6 +477,16 @@ def parse_tool_calls(text: str):
     return (tool_calls or None), remaining
 
 
+def _record_stats(model_id: str, completion_tokens: int,
+                  elapsed: float, tok_per_sec: float) -> None:
+    stats.last_model       = model_id
+    stats.last_tokens      = completion_tokens
+    stats.last_elapsed     = elapsed
+    stats.last_tok_per_sec = tok_per_sec
+    stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    stats.total_tokens    += completion_tokens
+
+
 # ---------------------------------------------------------------------------
 # Safe string extraction from openvino_genai generate() return value
 # pipe.generate() can return:
@@ -846,12 +856,7 @@ async def _chat_vlm(req: ChatRequest):
                 elapsed = time.time() - start
                 tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
                 log.info(f"{model_id} [VLM stream]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
-                stats.last_model       = model_id
-                stats.last_tokens      = completion_tokens
-                stats.last_elapsed     = elapsed
-                stats.last_tok_per_sec = tok_per_sec
-                stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
-                stats.total_tokens    += completion_tokens
+                _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
 
         finish_chunk = json.dumps({
             "id": f"chatcmpl-{chunk_id}",
@@ -885,13 +890,7 @@ async def _chat_vlm(req: ChatRequest):
         completion_tokens = len(tokenizer.encode(answer or ""))
         tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
         log.info(f"{model_id} [VLM]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
-
-        stats.last_model       = model_id
-        stats.last_tokens      = completion_tokens
-        stats.last_elapsed     = elapsed
-        stats.last_tok_per_sec = tok_per_sec
-        stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        stats.total_tokens    += completion_tokens
+        _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
     finally:
         stats.active_requests -= 1
 
@@ -973,39 +972,35 @@ async def chat(req: ChatRequest):
                     else:
                         log.info(f"{model_id} [agent]: no tool selected — returning empty")
 
-                completion_tokens = len(tokenizer.encode(answer or ""))
+                completion_tokens = len(tokenizer.encode(answer)) if answer else 0
                 tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
                 log.info(
                     f"{model_id} [agent]: {completion_tokens} tokens in {elapsed:.1f}s"
                     f" = {tok_per_sec:.1f} tok/s"
                 )
-                stats.last_model       = model_id
-                stats.last_tokens      = completion_tokens
-                stats.last_elapsed     = elapsed
-                stats.last_tok_per_sec = tok_per_sec
-                stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
-                stats.total_tokens    += completion_tokens
+                _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
 
                 if tool_calls:
                     delta = {"tool_calls": tool_calls}
                     finish_reason = "tool_calls"
                 else:
-                    delta = {"content": answer}
+                    delta = {"content": answer} if answer else {}
                     finish_reason = "stop"
 
-                content_chunk = json.dumps({
-                    "id": f"chatcmpl-{chunk_id}",
-                    "object": "chat.completion.chunk",
-                    "model": model_id,
-                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
-                })
                 finish_chunk = json.dumps({
                     "id": f"chatcmpl-{chunk_id}",
                     "object": "chat.completion.chunk",
                     "model": model_id,
                     "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
                 })
-                yield f"data: {content_chunk}\n\n"
+                if delta:
+                    content_chunk = json.dumps({
+                        "id": f"chatcmpl-{chunk_id}",
+                        "object": "chat.completion.chunk",
+                        "model": model_id,
+                        "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                    })
+                    yield f"data: {content_chunk}\n\n"
                 yield f"data: {finish_chunk}\n\n"
                 yield "data: [DONE]\n\n"
             finally:
@@ -1063,12 +1058,7 @@ async def chat(req: ChatRequest):
                 elapsed = time.time() - start
                 tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
                 log.info(f"{model_id} [stream]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
-                stats.last_model       = model_id
-                stats.last_tokens      = completion_tokens
-                stats.last_elapsed     = elapsed
-                stats.last_tok_per_sec = tok_per_sec
-                stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
-                stats.total_tokens    += completion_tokens
+                _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
 
         finish_chunk = json.dumps({
             "id": f"chatcmpl-{chunk_id}",
@@ -1110,13 +1100,7 @@ async def chat(req: ChatRequest):
         completion_tokens = len(tokenizer.encode(answer or ""))
         tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
         log.info(f"{req.model}: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s | finish={finish_reason}")
-
-        stats.last_model       = model_id
-        stats.last_tokens      = completion_tokens
-        stats.last_elapsed     = elapsed
-        stats.last_tok_per_sec = tok_per_sec
-        stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        stats.total_tokens    += completion_tokens
+        _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
     finally:
         stats.active_requests -= 1
 
@@ -1192,12 +1176,7 @@ async def _anthropic_stream(
         elapsed = time.time() - start
         tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
         log.info(f"{model_id} [anthropic stream]: {completion_tokens} tok in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
-        stats.last_model       = model_id
-        stats.last_tokens      = completion_tokens
-        stats.last_elapsed     = elapsed
-        stats.last_tok_per_sec = tok_per_sec
-        stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
-        stats.total_tokens    += completion_tokens
+        _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
 
     yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
     yield (
@@ -1232,13 +1211,7 @@ async def _local_complete(req: AnthropicRequest) -> dict:
     completion_tokens = len(tokenizer.encode(answer or ""))
     tok_per_sec       = completion_tokens / elapsed if elapsed > 0 else 0
     log.info(f"{model_id} [anthropic]: {completion_tokens} tok {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
-
-    stats.last_model       = model_id
-    stats.last_tokens      = completion_tokens
-    stats.last_elapsed     = elapsed
-    stats.last_tok_per_sec = tok_per_sec
-    stats.last_request_at  = datetime.now(timezone.utc).strftime("%H:%M:%S")
-    stats.total_tokens    += completion_tokens
+    _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
 
     content_blocks: List[Dict[str, Any]] = []
     if thinking_txt:
