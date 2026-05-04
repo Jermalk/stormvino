@@ -1005,9 +1005,11 @@ async def _anthropic_stream(
 
     lock = _infer_lock(model_id)
     await lock.acquire()
-    gen_task = asyncio.create_task(
-        loop.run_in_executor(None, partial(pipe.generate, prompt, gen_config, streamer))
-    )
+
+    async def _run_generation() -> None:
+        await loop.run_in_executor(None, partial(pipe.generate, prompt, gen_config, streamer))
+
+    gen_task = asyncio.create_task(_run_generation())
 
     completion_tokens = 0
     start = time.time()
