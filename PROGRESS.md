@@ -17,9 +17,9 @@
 
 ## NOW
 
-**Working on:** Framework migration — placing PROGRESS.md, SCRATCHPAD.md, DECISIONS.md, CLAUDE-ref.md, CLAUDE-changes.md at project root; merging framework rules into CLAUDE.md
-**Last commit:** 03b1675 — Add VLM support (Qwen2.5-VL-7B) via openvino_genai.VLMPipeline
-**Next action:** user to define
+**Working on:** Anthropic API compatibility layer — Phase 1 complete, starting Phase 2 (router)
+**Last commit:** 1f1ebb1 — docs: Phase 1 live test results + CMD_LOG sleep fix
+**Next action:** Step 6 — Backend ABC + LocalBackend in ov_server.py; update anthropic_messages() to dispatch through it
 **Blocked on:** nothing
-**Open questions:** none
-**Tests:** not run
+**Open questions:** Steps 9/10 (OVH, Anthropic pass-through) gated on API keys
+**Tests:** pass (32/32)
