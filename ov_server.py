@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Any, Dict, List, Optional, Tuple, Union
 import openvino_genai as ov_genai
@@ -9,7 +9,7 @@ import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal, c
 from PIL import Image
 from pathlib import Path
 from functools import partial
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi import Request
 from datetime import datetime, timezone
 import json
@@ -38,6 +38,31 @@ class DebugLoggingMiddleware(BaseHTTPMiddleware):
 
 
 app = FastAPI()
+
+# ---------------------------------------------------------------------------
+# Anthropic API compatibility layer (Step 1 & 2)
+# ---------------------------------------------------------------------------
+from anthropic_layer import (  # noqa: E402
+    AnthropicRequest,
+    _anthropic_to_messages,
+    _resolve_thinking,
+    _build_gen_config,
+)
+
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    if request.url.path.startswith("/v1/messages"):
+        error_type = {
+            401: "authentication_error",
+            400: "invalid_request_error",
+            404: "not_found_error",
+            429: "rate_limit_error",
+        }.get(exc.status_code, "api_error")
+        return JSONResponse(status_code=exc.status_code, content={
+            "type":  "error",
+            "error": {"type": error_type, "message": str(exc.detail)},
+        })
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 # ---------------------------------------------------------------------------
 # Config — loaded from config.json next to this script, falls back to
