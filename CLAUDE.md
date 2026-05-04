@@ -1,5 +1,39 @@
 # CLAUDE.md — ov_server (OpenVINO OpenAI-Compatible API Server)
 
+> **Context budget rule:** This file must stay under 320 lines.
+> When approaching the limit, extract sections to `CLAUDE-ref-N.md` and replace with a pointer.
+> Never load a `CLAUDE-ref` file unless the user explicitly asks about its topic.
+
+---
+
+## Re-entry protocol — read this first, every session
+
+**Bootstrap guard — check before anything else:**
+- `PROGRESS.md` missing → create with empty NOW section, continue.
+- `SCRATCHPAD.md` missing → create it empty, continue.
+
+**Normal re-entry — in this order:**
+1. Read `PROGRESS.md` — **NOW section only** (skip history).
+2. Read `SCRATCHPAD.md` — summarise in one paragraph. Write back as `## Carried over:` (first entry), then clear the rest.
+3. Read only files named in PROGRESS.md "Next action". If "Next action" is empty or absent → stop and ask.
+4. Stop. Do not open other files speculatively.
+
+If task is clear from steps 1–3, start coding. If not, ask — do not explore to resolve ambiguity.
+
+---
+
+## Framework rules
+
+| ID | Rule | Apply when |
+|---|---|---|
+| KYE | Know Your Enemy | Before any task — recon first |
+| SBS | Step By Step | Smallest verifiable step first |
+| AEC | Always Embrace Change | Prefer flexible design |
+| OMK | Overconfidence May Kill | Model proposes, user decides |
+| YNC | You're Not Chrome | External tools stay external; identity stays with the user |
+
+---
+
 ## Domain
 
 FastAPI server exposing an OpenAI-compatible REST API (`/v1/chat/completions`, `/v1/embeddings`, `/v1/models`) backed by `openvino_genai.LLMPipeline`. Runs on Linux Mint, Intel GPU (`GPU.1`), accessed from the local network on port `11435`.
@@ -15,7 +49,7 @@ FastAPI server exposing an OpenAI-compatible REST API (`/v1/chat/completions`, `
 | Prompt building | `build_chatml()` | Manual ChatML — **no tool call support yet** |
 | Streaming | `AsyncTokenStreamer` | Subclass of `ov_genai.StreamerBase`; event loop captured at construction |
 | Embeddings | `OVModelForFeatureExtraction` (optimum-intel) | Mean-pooled, L2-normalised |
-| Models | `qwen2.5-3b-int4`, `qwen3-8b-int4`, `qwen3-14b-int4` | Up to 2 loaded; LRU eviction with VRAM check |
+| Models | `qwen3-8b-int4-ov`, `qwen3-14b-int4-ov`, `qwen2.5-vl-7b-int4-ov` | Up to 2 loaded; LRU eviction with VRAM check |
 
 **Entry point:** `/opt/ov_server/ov_server.py`
 **Config file:** `/opt/ov_server/config.json`
@@ -25,68 +59,11 @@ FastAPI server exposing an OpenAI-compatible REST API (`/v1/chat/completions`, `
 
 ---
 
-## The Core Tool-Call Gap
+## Tool-Call Gap
 
-`openvino_genai` runs raw text generation — it does **not** handle OpenAI tool call semantics. Everything must be wired manually in `ov_server.py`. The current state:
+→ Full gap analysis, implementation order, and Qwen format spec in `CLAUDE-ref.md § Tool-Call Gap`.
 
-### What is missing
-
-1. **`ChatRequest` has no `tools` / `tool_choice` fields.**
-   The Pydantic model only accepts `messages`, `model`, `max_tokens`, `temperature`, `stream`, `thinking`.
-
-2. **`Message` has no `tool_calls` or `tool_call_id` fields.**
-   Tool result turns (`role: "tool"`) and assistant turns with tool invocations (`role: "assistant", tool_calls: [...]`) cannot be represented.
-
-3. **`build_chatml()` does not inject tool schemas.**
-   Tool definitions must be serialised into the system/user prompt (Qwen supports a specific JSON schema format) before the model can know what tools exist.
-
-4. **No tool-call output parser.**
-   Qwen models emit tool calls as a JSON block inside `<tool_call>…</tool_call>` tags. `ov_server.py` has no code to detect or extract these; the raw text is returned verbatim.
-
-5. **No `finish_reason: "tool_calls"` in responses.**
-   Callers (AnythingLLM, LangChain, etc.) rely on this field to know whether to parse `tool_calls` or treat the response as a final answer.
-
-6. **Streaming does not accumulate tool call fragments.**
-   A tool-call JSON block may arrive across multiple tokens; streaming must buffer and detect the complete block before emitting it as a `tool_calls` delta.
-
-### What needs to be added (implementation order)
-
-1. Extend `Message` to accept `tool_calls: Optional[List[ToolCall]]` and `tool_call_id: Optional[str]`.
-2. Extend `ChatRequest` to accept `tools: Optional[List[Tool]]` and `tool_choice`.
-3. Add `format_tools_for_chatml(tools)` — serialise tool schemas into the Qwen tool-call system prompt block.
-4. Extend `build_chatml()` to handle `role: "tool"` turns (tool results) and assistant turns that contain `tool_calls`.
-5. Add `extract_tool_calls(raw_text) -> (tool_calls, answer)` — detect `<tool_call>` blocks, parse JSON, return structured list.
-6. In the non-streaming response path: populate `message.tool_calls` and set `finish_reason: "tool_calls"` when tool calls are detected.
-7. In the streaming path: buffer tokens until `<tool_call>` blocks are complete, then emit as `tool_calls` deltas.
-
-### Qwen tool call format (reference)
-
-System prompt injection:
-```
-# Tools
-
-You may call one or more functions to assist with the user query.
-
-<tools>
-[{"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}]
-</tools>
-```
-
-Model output when calling a tool:
-```
-<tool_call>
-{"name": "function_name", "arguments": {"param": "value"}}
-</tool_call>
-```
-
-Tool result turn (injected into next prompt):
-```
-<|im_start|>tool
-<tool_response>
-{"result": "..."}
-</tool_response>
-<|im_end|>
-```
+**Summary:** `openvino_genai` does not handle OpenAI tool-call semantics. `ChatRequest` and `Message` have no `tools`/`tool_calls` fields, `build_chatml()` does not inject tool schemas, and there is no `<tool_call>` parser or `finish_reason: "tool_calls"` emission.
 
 ---
 
@@ -94,17 +71,88 @@ Tool result turn (injected into next prompt):
 
 | Location | Issue |
 |---|---|
-| `full_stream()` (line ~338) | Finish chunk has hardcoded `"id": "chatcmpl-x"` — should use the same `chunk_id` from `token_generator()` |
-| `format_thinking()` | Injects Markdown blockquote formatting into the `content` string — breaks tool-call JSON if thinking is enabled during tool use |
-| `get_model()` (line 183) | Uses deprecated `asyncio.get_event_loop()` — prefer `asyncio.get_running_loop()` |
+| `full_stream()` (line ~338) | Hardcoded `"id": "chatcmpl-x"` — should use `chunk_id` from `token_generator()` |
+| `format_thinking()` | Injects Markdown blockquote into `content` — breaks tool-call JSON if thinking is enabled |
+| `get_model()` (line 183) | Deprecated `asyncio.get_event_loop()` — use `asyncio.get_running_loop()` |
 | `get_embedding_model()` (line 207) | Same deprecated call |
-| Streaming stats | `stats.busy` set to `False` in `finally` of `token_generator` but exceptions in `run_generation` can leave it stuck |
+| Streaming stats | `stats.busy` can get stuck if `run_generation` raises before `finally` |
+
+---
+
+## Context load discipline
+
+| Situation | Load | Do not load |
+|---|---|---|
+| Session start | `PROGRESS.md` NOW, `SCRATCHPAD.md` | Everything else until needed |
+
+Never load speculatively. Test files only when writing or fixing that test.
+
+**Context-filling trigger — when sum of open file lines exceeds 800:**
+1. Write current state to `SCRATCHPAD.md` immediately (facts only, bullets).
+2. Finish the current atomic unit (one function or one test).
+3. Commit what is complete.
+4. Tell the user: *"Context is filling — recommend a new session. SCRATCHPAD.md has the handoff."*
+
+Do not attempt to complete a large task when context is near limit.
+
+---
+
+## PROGRESS.md — NOW section format
+
+```
+## NOW
+
+**Working on:** <one sentence>
+**Last commit:** <hash> — <message>
+**Next action:** <specific file and function name>
+**Blocked on:** <decision needed, or "nothing">
+**Open questions:** <brief list, or "none">
+**Tests:** <"pass" | "fail — N failing" | "not run">
+```
+
+File has two parts: history (append-only, skip on re-entry) and NOW (overwritten each session, always last). **During session-wrap: copy current NOW into History first, then overwrite NOW.** Never skip — it is the only audit trail.
+
+---
+
+## DECISIONS.md — entry format
+
+```
+### YYYY-MM-DD — <topic>
+**Decision:** <one sentence>
+**Rationale:** <one to three sentences>
+**Rejected alternative:** <one sentence, or "none considered">
+**Affects:** <file or component name>
+```
+
+Read `DECISIONS.md` only when the user explicitly asks about a past decision.
+
+---
+
+## SCRATCHPAD.md discipline
+
+In-session working memory. Write to it when:
+- You have analysed a file — write extracted facts, not the filename.
+- You are mid-way through a multi-step change and context is filling.
+- You have made a decision not yet in `DECISIONS.md`.
+
+Format: bullet points, max 5 lines per topic, no prose. Cleared at start of every session (carry-over paragraph replaces it).
+
+---
+
+## `#session-wrap`
+
+1. Run tests if available.
+2. Copy current NOW block verbatim into `PROGRESS.md` History (append as `### YYYY-MM-DD — Session N (<hash>)`), then overwrite NOW with updated fields including **Tests** result.
+3. Append to `DECISIONS.md` — one entry per architectural decision made this session.
+4. Clear `SCRATCHPAD.md`, write one-paragraph session summary.
+5. Commit: `docs: session wrap — <summary>`.
+6. Report: committed files, what NOW says, what next session opens first.
 
 ---
 
 ## Hard Rules
 
-- **Never use `sudo pip install`.** All dependencies live in the venv at `/ov_server/venv` (or equivalent). Activate before installing.
+- **Never use `sudo pip install`.** All dependencies live in the venv at `/ov_server/venv`.
 - **PEP8 compliant Python.** Use `black` if available.
 - **Type hints on all function signatures.**
 - **No bare `except:`.** Catch specific exceptions.
@@ -114,20 +162,18 @@ Tool result turn (injected into next prompt):
   core = ov.Core()
   assert "GPU.1" in core.available_devices, "GPU.1 not available"
   ```
-- **Do not break the existing `/health`, `/v1/models`, `/v1/embeddings` endpoints** when modifying the chat path.
+- **Do not break `/health`, `/v1/models`, `/v1/embeddings`** when modifying the chat path.
 - **Test both streaming and non-streaming** after any change to `chat()`.
 
 ---
 
 ## Diagnostic Protocol
 
-For every issue, complete this sequence before writing a fix:
-
 1. **Snapshot** — `hostnamectl`, `python3 --version`, check venv active, `lscpu | grep "Model name"`.
-2. **Logs** — `journalctl -u ov_server` or the process stdout. Read the traceback before hypothesising.
+2. **Logs** — `journalctl -u ov_server` or process stdout. Read the traceback before hypothesising.
 3. **Hypothesis** — State explicitly what is wrong and why.
 4. **Targeted fix** — Minimal change that resolves the root cause.
-5. **Verification** — `curl -s http://localhost:11435/health | python3 -m json.tool` to confirm server is alive; follow with a minimal chat request.
+5. **Verification** — `curl -s http://localhost:11435/health | python3 -m json.tool`; follow with a minimal chat request.
 
 ---
 
@@ -135,8 +181,8 @@ For every issue, complete this sequence before writing a fix:
 
 - `pathlib.Path` over `os.path`.
 - Environment variables via `os.environ.get()` with defaults — never hardcoded paths except `MODELS_DIR` (already parameterised).
-- Async blocking work goes through `loop.run_in_executor(None, ...)` — never `await` a CPU-bound call directly.
-- Use `asyncio.get_running_loop()` (not deprecated `get_event_loop()`) for all new code.
+- Async blocking work via `loop.run_in_executor(None, ...)` — never `await` a CPU-bound call directly.
+- Use `asyncio.get_running_loop()` — not deprecated `get_event_loop()`.
 
 ---
 
@@ -145,13 +191,14 @@ For every issue, complete this sequence before writing a fix:
 | File | Purpose |
 |---|---|
 | `ov_server.py` | Single-file server — keep it that way unless a module exceeds ~200 lines of distinct concern |
-| `config.json` | Runtime config: models_dir, device, model names, limits. Server falls back to defaults if absent. |
-| `README.md` | User-facing commands: start, logs, debug toggle, network access, health/model checks |
+| `config.json` | Runtime config: models_dir, device, model names, limits. Falls back to defaults if absent. |
+| `README.md` | User-facing commands — **keep in sync** with any endpoint/startup/network changes |
 | `MODELS.md` | Model conversion guide, directory layout, VRAM sizing, adding/removing models |
-| `DECISIONS.md` | Architectural choices with rationale |
-| `PROGRESS.md` | Completed steps, current state, next actions |
-
-**README.md must be kept in sync.** After any change to: startup flags, port, network config, logging behaviour, or available endpoints — update `README.md` before committing. If a command in README.md no longer works after a code change, fix the README in the same commit.
+| `PROGRESS.md` | Build progress — read NOW section only on re-entry |
+| `DECISIONS.md` | Append-only architectural decisions log |
+| `SCRATCHPAD.md` | In-session working memory |
+| `CLAUDE-ref.md` | Reference detail (Tool-Call Gap, Qwen format) — load only on explicit request |
+| `CLAUDE-changes.md` | Audit log of every change made to this file |
 
 ---
 
@@ -160,3 +207,9 @@ For every issue, complete this sequence before writing a fix:
 - Technical and precise. No filler phrases.
 - When uncertain, say so explicitly.
 - Provide commands ready to copy-paste with no unresolved placeholders.
+
+---
+
+## Dev notes
+
+- **EnvyStorm** is the dev machine: OpenVINO + Arc B60. Local inference, zero cloud.
