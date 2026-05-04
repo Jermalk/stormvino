@@ -70,3 +70,15 @@
 **Rationale:** Framework was proven in another project; centralises session discipline so Claude Code behaves consistently across restarts without re-explanation.
 **Rejected alternative:** Keeping framework in separate tmp/ directory — too easy to miss on re-entry.
 **Affects:** CLAUDE.md, PROGRESS.md, SCRATCHPAD.md, DECISIONS.md, CLAUDE-ref.md, CLAUDE-changes.md
+
+### 2026-05-04 — Agent streaming: buffer internally for AnythingLLM
+**Decision:** When `is_agent=True && stream=True`, run generation without the token streamer, strip `<think>` blocks, emit a single SSE chunk with the clean result.
+**Rationale:** AnythingLLM parses the full streamed content as JSON; raw token streaming exposed `<think>` blocks that broke JSON parsing silently.
+**Rejected alternative:** Keep raw streaming, instruct users to disable thinking — fragile; thinking can leak even with `/no_think` appended.
+**Affects:** `chat()` in ov_server.py — `agent_stream()` inner generator.
+
+### 2026-05-04 — _extract_agent_json: JSON extraction from prose
+**Decision:** Post-process agent model output with `_extract_agent_json()` to find the first `{"name":...,"arguments":...}` object; return `""` when none found.
+**Rationale:** qwen3-8b follows "respond in JSON" less strictly than the original qwen2.5-3b; it wraps JSON in prose or generates prose-only responses. Extraction recovers embedded JSON; empty return lets AnythingLLM fall back to the 14b immediately (~3s) instead of waiting 16s.
+**Rejected alternative:** Switch agent_model back to qwen2.5-3b — model no longer on disk.
+**Affects:** `_extract_agent_json()` + `agent_stream()` in ov_server.py.

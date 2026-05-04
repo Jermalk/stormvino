@@ -55,10 +55,20 @@
 
 ---
 
+### 2026-05-04 — Session 6 (64e8863)
+**Working on:** AnythingLLM agentic mode diagnosis and repair
+**Last commit:** 64e8863 — refactor: extract _record_stats(); guard empty tokenization in agent path
+**Next action:** Hashtag routing — `_pick_backend()` patch + `~/.claude/hooks/route-selector.sh` (plan in SCRATCHPAD.md); OR Step 10 AnthropicBackend if ANTHROPIC_API_KEY arrives
+**Blocked on:** nothing
+**Open questions:** debug logging still ON — run `kill -USR1 $(systemctl show ov-server --property=MainPID --value)` to disable
+**Tests:** pass (32/32)
+
+---
+
 ## NOW
 
-**Working on:** Hashtag routing implementation
-**Last commit:** 7aebc3c — docs: CLAUDE_CODE_INTEGRATION.md — setup guide + hashtag routing design
+**Working on:** Hashtag routing (deferred from Session 5) — no new blockers
+**Last commit:** 64e8863 — refactor: extract _record_stats(); guard empty tokenization in agent path
 **Next action:** Server patch — top of `_pick_backend()` in ov_server.py; then create `~/.claude/hooks/route-selector.sh`; code in CLAUDE_CODE_INTEGRATION.md §3a–§3b
 **Blocked on:** nothing
 **Open questions:** Step 10 (AnthropicBackend) deferred until ANTHROPIC_API_KEY available
