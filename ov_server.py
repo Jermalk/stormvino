@@ -12,6 +12,7 @@ from pathlib import Path
 from functools import partial
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi import Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from datetime import datetime, timezone
 import json
 import numpy as np
@@ -39,6 +40,23 @@ class DebugLoggingMiddleware(BaseHTTPMiddleware):
 
 
 app = FastAPI()
+
+# ---------------------------------------------------------------------------
+# Optional bearer-token auth — applied only to /v1/messages routes.
+# Auth is fully disabled when OV_SERVER_API_KEY env var is unset.
+# ---------------------------------------------------------------------------
+_bearer  = HTTPBearer(auto_error=False)
+_API_KEY = os.getenv("OV_SERVER_API_KEY", "")
+
+
+async def verify_token(
+    credentials: HTTPAuthorizationCredentials = Depends(_bearer),
+) -> None:
+    if not _API_KEY:
+        return
+    if credentials is None or credentials.credentials != _API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
 
 # ---------------------------------------------------------------------------
 # Anthropic API compatibility layer (Step 1 & 2)
@@ -1310,7 +1328,7 @@ def _pick_backend(model: str) -> Backend:
     return backend
 
 
-@app.post("/v1/messages")
+@app.post("/v1/messages", dependencies=[Depends(verify_token)])
 async def anthropic_messages(req: AnthropicRequest):
     log.info(f"[/v1/messages] model={req.model!r} stream={req.stream}")
     stats.active_requests += 1
@@ -1334,7 +1352,7 @@ async def anthropic_messages(req: AnthropicRequest):
         stats.active_requests -= 1
 
 
-@app.post("/v1/messages/count_tokens")
+@app.post("/v1/messages/count_tokens", dependencies=[Depends(verify_token)])
 async def anthropic_count_tokens(req: AnthropicRequest):
     pipe      = await get_model(req.model)
     model_id  = next(k for k in loaded_models if loaded_models[k] is pipe)
