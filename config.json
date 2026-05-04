@@ -7,8 +7,16 @@
     "embedding_model":        "multilingual-e5-large-int8",
     "vision_model":           "qwen2.5-vl-7b-int4-ov",
     "model_aliases":          {
-        "qwen2.5-coder:14b":  "qwen2.5-coder-14b-int4",
-        "qwen3-14b-int4":        "qwen3-14b-int4-ov"
+        "qwen2.5-coder:14b":      "qwen2.5-coder-14b-int4",
+        "qwen3-14b-int4":         "qwen3-14b-int4-ov",
+        "claude-haiku-4-5-20251001": "qwen3-8b-int4-ov",
+        "claude-haiku-4-5":       "qwen3-8b-int4-ov",
+        "claude-sonnet-4-6":      "qwen3-14b-int4-ov",
+        "claude-opus-4-7":        "qwen3-14b-int4-ov"
+    },
+    "routing": {
+        "default":   "local",
+        "model_map": {}
     },
     "max_loaded_models":      2,
     "vram_headroom_gb":       1.5,

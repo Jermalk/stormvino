@@ -1137,7 +1137,25 @@ class LocalBackend(Backend):
         return _anthropic_stream(pipe, model_id, prompt, gen_config, prompt_tokens)
 
 
-_backend: Backend = LocalBackend()
+def _build_backends() -> Dict[str, Backend]:
+    """Instantiate backend objects declared in config routing section."""
+    return {"local": LocalBackend()}
+
+
+_backends: Dict[str, Backend] = _build_backends()
+
+
+def _pick_backend(model: str) -> Backend:
+    """Return the Backend for the given model name.
+    Consults routing.model_map for an explicit override, then routing.default."""
+    routing: Dict[str, Any] = _cfg.get("routing", {})
+    model_map: Dict[str, str] = routing.get("model_map", {})
+    name = model_map.get(model, routing.get("default", "local"))
+    backend = _backends.get(name)
+    if backend is None:
+        log.warning(f"Backend '{name}' not configured — falling back to local")
+        backend = _backends["local"]
+    return backend
 
 
 @app.post("/v1/messages")
@@ -1146,10 +1164,12 @@ async def anthropic_messages(req: AnthropicRequest):
     stats.active_requests += 1
     stats.total_requests  += 1
 
+    backend = _pick_backend(req.model)
+
     if req.stream:
         # prepare_stream() does all setup; errors here catch before any SSE yield.
         try:
-            gen = await _backend.prepare_stream(req)
+            gen = await backend.prepare_stream(req)
         except Exception:
             stats.active_requests -= 1
             raise
@@ -1157,7 +1177,7 @@ async def anthropic_messages(req: AnthropicRequest):
         return StreamingResponse(gen, media_type="text/event-stream")
 
     try:
-        return await _backend.complete(req)
+        return await backend.complete(req)
     finally:
         stats.active_requests -= 1
 
