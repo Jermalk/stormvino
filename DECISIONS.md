@@ -5,6 +5,24 @@
 
 ---
 
+### 2026-05-05 — claude_code mode in config + _resolve_claude_code()
+**Decision:** Claude Code integration lives in a dedicated `claude_code` config section with wildcard model_map, rather than polluting `model_aliases`.
+**Rationale:** Claude Code is always identifiable by `claude-*` model names; one block controls enabled/disabled, thinking suppression, per-tier routing (haiku→coder, sonnet→14b, opus→OVH), and future Anthropic passthrough. Easier to toggle and reason about than scattered aliases.
+**Rejected alternative:** Keeping claude-* entries in model_aliases — no way to disable cleanly or add thinking/backend metadata.
+**Affects:** config.json, ov_server.py (_resolve_claude_code, anthropic_messages, anthropic_count_tokens)
+
+### 2026-05-05 — _maximize_context_for() on every local claude_code request
+**Decision:** Each /v1/messages request resolved to a local backend via claude_code mode calls `_maximize_context_for(model_id)` which computes max KV cache leaving `vram_reserve_pct` VRAM free, then evicts all LLMs and updates MAX_LOADED_MODELS=1 if KV changes.
+**Rationale:** Claude Code benefits from maximum context; the fast-path check (kv unchanged && max_models==1) makes subsequent requests for the same model free.
+**Rejected alternative:** A static "claude-code" profile — can't compute KV dynamically per model.
+**Affects:** ov_server.py (_maximize_context_for), config.json (claude_code.vram_reserve_pct)
+
+### 2026-05-05 — vram_reserve_pct default 20% (not 5%)
+**Decision:** Default `vram_reserve_pct` is 20%, giving ~9GB KV for qwen3-14b (4.6GB free) rather than 12GB KV (1.6GB free).
+**Rationale:** Empirically, 12GB KV on the B60 causes inference to hang at 100W with no token output — the continuous batching scheduler needs ~4GB working memory for attention computation buffers beyond the KV allocation. 5% free (~1.6GB) is insufficient; 20% free (~4.6GB) is the practical minimum for reliable generation.
+**Rejected alternative:** 5% as user requested — physically impossible on this GPU without generation hanging.
+**Affects:** config.json (claude_code.vram_reserve_pct)
+
 ### 2026-05-04 — Anthropic layer as separate module (anthropic_layer.py)
 **Decision:** Anthropic Pydantic models and helpers live in anthropic_layer.py, imported by ov_server.py.
 **Rationale:** Keeps ov_server.py as the single entry point while isolating Anthropic-specific types; allows testing models without importing the full server (GPU init avoided in pytest).

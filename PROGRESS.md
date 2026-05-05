@@ -95,11 +95,21 @@
 
 ---
 
+### 2026-05-05 — Session 10 (pre-wrap commit TBD)
+**Working on:** Claude Code integration — auth fix, claude_code mode, VRAM eviction fix, max-context
+**Last commit:** 2efca40 — docs: session wrap — profile switching bugfixes, VLM VRAM bar, smart eviction
+**Next action:** Debug why streaming response doesn't reach Claude Code (hello hangs despite model loading OK)
+**Blocked on:** nothing
+**Open questions:** Why does claude-sonnet-4-6 → qwen3-14b stream silently at 100W GPU and never deliver tokens to Claude Code?
+**Tests:** pass (32/32)
+
+---
+
 ## NOW
 
-**Working on:** Hashtag routing (next up)
-**Last commit:** 91870ec — fix: only evict LLMs on profile switch when KV budget changes
-**Next action:** `_pick_backend()` patch in ov_server.py + `~/.claude/hooks/route-selector.sh`; full code in CLAUDE_CODE_INTEGRATION.md §3a–§3b
+**Working on:** Debug Claude Code streaming — "hello" hangs (model loads OK, GPU at 100W, no tokens delivered)
+**Last commit:** TBD (session wrap commit)
+**Next action:** Investigate _anthropic_stream / AsyncTokenStreamer — add per-token log, test with curl, compare with /v1/chat path
 **Blocked on:** nothing
-**Open questions:** Step 10 (AnthropicBackend) deferred until ANTHROPIC_API_KEY available
+**Open questions:** (1) Why does streaming via /v1/messages silently hang when qwen3-14b is loaded with claude_code mode? (2) Does the same prompt via /v1/chat/completions work? (3) Is there a lock or queue issue in AsyncTokenStreamer under CB mode?
 **Tests:** pass (32/32)

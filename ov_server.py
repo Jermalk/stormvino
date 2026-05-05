@@ -640,39 +640,63 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
         while len(loaded_models) >= MAX_LOADED_MODELS:
             _evict_lru()
 
-        # Soft cap: evict LRU until VRAM headroom is satisfied (re-query after each eviction)
-        size = model_size_gb(model_id)
-        free = vram_free_gb()
+        # Soft cap: evict LRU until VRAM headroom is satisfied (re-query after each eviction).
+        # Include KV cache in size estimate — OpenVINO allocates weights + KV together.
+        kv_gb = _cfg.get("kv_cache_size_gb", 8)
+        size  = model_size_gb(model_id) + kv_gb
+        free  = vram_free_gb()
         if free is not None:
             while free - size < VRAM_HEADROOM_GB and loaded_models:
-                log.info(f"VRAM free={free:.1f}GB, model={size:.1f}GB, headroom={VRAM_HEADROOM_GB}GB — evicting LRU")
+                log.info(f"VRAM free={free:.1f}GB, model+KV={size:.1f}GB, headroom={VRAM_HEADROOM_GB}GB — evicting LRU")
                 _evict_lru()
                 free = vram_free_gb()
         else:
             log.debug("VRAM query unavailable — relying on model count limit only")
 
-        log.info(f"Loading {model_id} (~{size:.1f}GB)...")
-        try:
+        weights_gb = model_size_gb(model_id)
+        log.info(f"Loading {model_id} (~{weights_gb:.1f}GB)...")
+
+        async def _do_load() -> ov_genai.LLMPipeline:
             loop = asyncio.get_running_loop()
-            pipe = await loop.run_in_executor(
+            return await loop.run_in_executor(
                 None,
                 partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
                         scheduler_config=get_scheduler_config(), **CONFIG)
             )
+
+        try:
+            pipe = await _do_load()
+        except Exception as e:
+            # OpenVINO KV-cache OOM: our VRAM estimates can be imprecise; evict and retry once.
+            if "size_in_bytes <= total_mem_size" in str(e) and loaded_models:
+                log.warning(f"VRAM OOM loading {model_id} — evicting LRU and retrying")
+                _evict_lru()
+                try:
+                    pipe = await _do_load()
+                except Exception as e2:
+                    log.error(f"Failed to load {model_id} after eviction: {e2}")
+                    raise HTTPException(status_code=500, detail=str(e2))
+            else:
+                log.error(f"Failed to load {model_id}: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        try:
+            loop = asyncio.get_running_loop()
             tokenizer = await loop.run_in_executor(
                 None,
                 partial(AutoTokenizer.from_pretrained, AVAILABLE_MODELS[model_id], fix_mistral_regex=True)
             )
-            loaded_models[model_id] = pipe
-            loaded_tokenizers[model_id] = tokenizer
-            model_last_used[model_id] = time.time()
-            _vram_allocated[model_id] = model_size_gb(model_id) + _cfg.get("kv_cache_size_gb", 8)
-            free_after = vram_free_gb()
-            log.info(f"Loaded {model_id} | VRAM allocated: {_vram_allocated[model_id]:.1f}GB"
-                     + (f", free: {free_after:.1f}GB" if free_after is not None else ""))
         except Exception as e:
-            log.error(f"Failed to load {model_id}: {e}")
+            log.error(f"Failed to load tokenizer for {model_id}: {e}")
             raise HTTPException(status_code=500, detail=str(e))
+
+        loaded_models[model_id] = pipe
+        loaded_tokenizers[model_id] = tokenizer
+        model_last_used[model_id] = time.time()
+        _vram_allocated[model_id] = weights_gb + kv_gb
+        free_after = vram_free_gb()
+        log.info(f"Loaded {model_id} | VRAM allocated: {_vram_allocated[model_id]:.1f}GB"
+                 + (f", free: {free_after:.1f}GB" if free_after is not None else ""))
     return loaded_models[model_id]
 
 
@@ -836,6 +860,46 @@ async def _apply_profile(name: str) -> None:
             log.error(f"Profile switch to '{name}' failed: {exc}")
         finally:
             _profile_switching = False
+
+
+async def _maximize_context_for(model_id: str) -> None:
+    """Set KV cache to give model_id maximum context, leaving vram_reserve_pct VRAM free.
+    Evicts all LLMs when KV size changes. Enforces max_loaded_models=1."""
+    global MAX_LOADED_MODELS
+    if _TOTAL_VRAM_GB is None:
+        return
+    reserve_pct: float = _cfg.get("claude_code", {}).get("vram_reserve_pct", 5.0)
+    weights = model_size_gb(model_id)
+    kv_gb   = max(1, int(_TOTAL_VRAM_GB * (1.0 - reserve_pct / 100.0) - weights))
+
+    current_kv = _cfg.get("kv_cache_size_gb", 8)
+    kv_changed = kv_gb != current_kv
+
+    # Fast path: already in the right state.
+    if not kv_changed and _cfg.get("max_loaded_models") == 1:
+        return
+
+    if kv_changed:
+        async with _model_lock:
+            for mid in list(loaded_models):
+                del loaded_models[mid]
+                del loaded_tokenizers[mid]
+                model_last_used.pop(mid, None)
+                _vram_allocated.pop(mid, None)
+        gc.collect()
+        log.info(
+            f"[claude-code] {model_id}: KV {current_kv}→{kv_gb}GB "
+            f"({100 - reserve_pct:.0f}% of {_TOTAL_VRAM_GB:.1f}GB − {weights:.1f}GB weights) "
+            "— all LLMs evicted"
+        )
+    else:
+        async with _model_lock:
+            while len(loaded_models) > 1:
+                _evict_lru()
+
+    _cfg["kv_cache_size_gb"]  = kv_gb
+    _cfg["max_loaded_models"] = 1
+    MAX_LOADED_MODELS = 1
 
 
 # ---------------------------------------------------------------------------
@@ -1581,13 +1645,41 @@ def _pick_backend(model: str) -> Backend:
     return backend
 
 
+def _resolve_claude_code(model: str) -> Optional[Dict[str, Any]]:
+    """If claude_code mode is enabled and model matches a claude-* pattern,
+    return {model, backend, thinking}. Else None."""
+    cc = _cfg.get("claude_code", {})
+    if not cc.get("enabled", False):
+        return None
+    if not model.startswith("claude-"):
+        return None
+    thinking: bool = cc.get("thinking", False)
+    for pattern, entry in cc.get("model_map", {}).items():
+        if pattern.endswith("*"):
+            matched = model.startswith(pattern[:-1])
+        else:
+            matched = model == pattern
+        if matched:
+            return {"model": entry["model"], "backend": entry.get("backend", "local"), "thinking": thinking}
+    log.warning(f"claude-code mode: no model_map entry for '{model}' — falling back to default local model")
+    return {"model": _cfg.get("default_model", DEFAULT_MODEL), "backend": "local", "thinking": thinking}
+
+
 @app.post("/v1/messages", dependencies=[Depends(verify_token)])
 async def anthropic_messages(req: AnthropicRequest):
     log.info(f"[/v1/messages] model={req.model!r} stream={req.stream}")
     stats.active_requests += 1
     stats.total_requests  += 1
 
-    backend = _pick_backend(req.model)
+    cc = _resolve_claude_code(req.model)
+    if cc:
+        log.info(f"[claude-code] {req.model!r} → {cc['model']!r} via {cc['backend']}")
+        req     = req.model_copy(update={"model": cc["model"], "thinking": cc["thinking"]})
+        backend = _backends.get(cc["backend"]) or _backends["local"]
+        if cc["backend"] == "local":
+            await _maximize_context_for(cc["model"])
+    else:
+        backend = _pick_backend(req.model)
 
     if req.stream:
         # prepare_stream() does all setup; errors here catch before any SSE yield.
@@ -1607,6 +1699,9 @@ async def anthropic_messages(req: AnthropicRequest):
 
 @app.post("/v1/messages/count_tokens", dependencies=[Depends(verify_token)])
 async def anthropic_count_tokens(req: AnthropicRequest):
+    cc = _resolve_claude_code(req.model)
+    if cc:
+        req = req.model_copy(update={"model": cc["model"], "thinking": cc["thinking"]})
     pipe      = await get_model(req.model)
     model_id  = next(k for k in loaded_models if loaded_models[k] is pipe)
     tokenizer = loaded_tokenizers[model_id]

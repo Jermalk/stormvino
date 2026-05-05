@@ -51,8 +51,8 @@ class AnthropicMessage(BaseModel):
 
 
 class AnthropicThinking(BaseModel):
-    type: str           # "enabled" | "disabled"
-    budget_tokens: int
+    type: str                    # "enabled" | "disabled" | "adaptive"
+    budget_tokens: Optional[int] = None  # absent for "adaptive" type
 
     model_config = ConfigDict(extra="ignore")
 
@@ -83,7 +83,7 @@ def _resolve_thinking(param: Optional[Union[bool, AnthropicThinking]]) -> bool:
     if isinstance(param, bool):
         return param
     if isinstance(param, AnthropicThinking):
-        return param.type == "enabled"
+        return param.type == "enabled"  # "disabled" and "adaptive" → no thinking
     return True
 
 

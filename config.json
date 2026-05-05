@@ -7,18 +7,22 @@
     "embedding_model":        "multilingual-e5-large-int8",
     "vision_model":           "qwen2.5-vl-7b-int4-ov",
     "model_aliases":          {
-        "qwen2.5-coder:14b":      "qwen2.5-coder-14b-int4",
-        "qwen3-14b-int4":         "qwen3-14b-int4-ov",
-        "claude-haiku-4-5-20251001": "qwen3-8b-int4-ov",
-        "claude-haiku-4-5":       "qwen3-8b-int4-ov",
-        "claude-sonnet-4-6":      "qwen3-14b-int4-ov",
-        "claude-opus-4-7":        "qwen3-14b-int4-ov"
+        "qwen2.5-coder:14b":  "qwen2.5-coder-14b-int4",
+        "qwen3-14b-int4":     "qwen3-14b-int4-ov"
+    },
+    "claude_code": {
+        "enabled": true,
+        "thinking": false,
+        "vram_reserve_pct": 20,
+        "model_map": {
+            "claude-haiku-*":  { "backend": "local", "model": "qwen2.5-coder-14b-int4" },
+            "claude-sonnet-*": { "backend": "local", "model": "qwen3-14b-int4-ov" },
+            "claude-opus-*":   { "backend": "ovh",   "model": "Qwen3-32B" }
+        }
     },
     "routing": {
         "default":   "local",
-        "model_map": {
-            "claude-opus-4-7": "ovh"
-        },
+        "model_map": {},
         "backends": {
             "ovh": {
                 "type":        "openai_compat",
