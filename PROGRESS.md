@@ -78,7 +78,7 @@
 ## NOW
 
 **Working on:** Hashtag routing (next logical step)
-**Last commit:** TBD — session wrap commit
+**Last commit:** 25779eb — fix: VRAM eviction, KV cache budget, model preloading
 **Next action:** `_pick_backend()` patch in ov_server.py; then `~/.claude/hooks/route-selector.sh`; full code in CLAUDE_CODE_INTEGRATION.md §3a–§3b
 **Blocked on:** nothing
 **Open questions:** Step 10 (AnthropicBackend) deferred until ANTHROPIC_API_KEY available
