@@ -782,14 +782,20 @@ async def _apply_profile(name: str) -> None:
             if stats.active_requests > 0:
                 log.warning(f"Profile switch proceeding with {stats.active_requests} active request(s) still in flight")
 
-            # Evict all LLMs
+            # Evict all LLMs and VLMs
             async with _model_lock:
                 for mid in list(loaded_models):
                     del loaded_models[mid]
                     del loaded_tokenizers[mid]
                     model_last_used.pop(mid, None)
                     _vram_allocated.pop(mid, None)
-                gc.collect()
+            async with _vlm_lock:
+                for mid in list(loaded_vlm_models):
+                    del loaded_vlm_models[mid]
+                    del loaded_vlm_tokenizers[mid]
+                    model_last_used.pop(mid, None)
+                    _vram_allocated.pop(mid, None)
+            gc.collect()
 
             # Apply new settings to live config
             _cfg["kv_cache_size_gb"]  = prof.get("kv_cache_size_gb",  _cfg["kv_cache_size_gb"])
