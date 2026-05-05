@@ -5,6 +5,24 @@
 
 ---
 
+### 2026-05-06 — aider installed in ov_env, george alias defaults to qwen3-14b + diff format
+**Decision:** aider installed into `/home/jerzy/ov_env` (not pipx); `george` alias uses `qwen3-14b-int4-ov` with `--edit-format diff`.
+**Rationale:** pipx unavailable without sudo; ov_env is the practical install target. diff format prevents whole-file truncation bugs (observed: `1.:0` SQL hallucination propagated through 3 rewrites when using whole format).
+**Rejected alternative:** qwen3-8b as george default — 14b proved fast enough at aider's token volumes (~60 tok/response).
+**Affects:** ~/.bashrc george alias
+
+### 2026-05-06 — Architect+George two-agent protocol via TASK_LEDGER.md
+**Decision:** Claude acts as architect (plans tasks, reviews results), george executes (edits files, commits, marks done) via shared `TASK_LEDGER.md` file.
+**Rationale:** Separates reasoning from execution; keeps Claude API calls to planning only; local model handles all file I/O. Max 5 TODO tasks at once to prevent context overload in george.
+**Rejected alternative:** Automated architect mode via aider `--architect` flag — requires Anthropic API key in aider config; file-based protocol works without it.
+**Affects:** EternalGrain/ARCHITECT_MODE.md
+
+### 2026-05-06 — MCP server for george+ov_server deferred to next session
+**Decision:** Build `george_mcp.py` exposing george_edit, george_query, server_health, server_profile as MCP tools for Claude Code.
+**Rationale:** Proper tool integration eliminates manual file-passing workflow; aider `--yes --message` supports non-interactive invocation.
+**Rejected alternative:** Bash wrapper scripts — works but not first-class tools in CC context.
+**Affects:** /opt/ov_server/george_mcp.py (to be created), ~/.claude/settings.json
+
 ### 2026-05-05 — claude_code mode in config + _resolve_claude_code()
 **Decision:** Claude Code integration lives in a dedicated `claude_code` config section with wildcard model_map, rather than polluting `model_aliases`.
 **Rationale:** Claude Code is always identifiable by `claude-*` model names; one block controls enabled/disabled, thinking suppression, per-tier routing (haiku→coder, sonnet→14b, opus→OVH), and future Anthropic passthrough. Easier to toggle and reason about than scattered aliases.

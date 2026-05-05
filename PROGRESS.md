@@ -135,11 +135,21 @@
 
 ---
 
-## NOW
-
+### 2026-05-06 — Session 14 (no ov_server code changes)
 **Working on:** Voice agent future plan documented; ready for Phase 1 (STT) whenever user decides
 **Last commit:** dc732a0 — docs: session wrap — voice agent plan, CURRENT_PLAN archived
 **Next action:** Phase 1 STT — convert Whisper via optimum-cli, add OVModelForSpeechSeq2Seq, implement POST /v1/audio/transcriptions (see FUTURE_PLAN.md § Phase 1)
 **Blocked on:** nothing — user decides when to start
 **Open questions:** (1) Whisper model size choice: small (fast) vs large-v3-turbo (accurate). (2) Kokoro-82M vs Piper for TTS. (3) Simultaneous STT+LLM requests: serialise or queue?
+**Tests:** pass (32/32)
+
+---
+
+## NOW
+
+**Working on:** Architect+George two-agent workflow design; MCP server for george/ov_server deferred
+**Last commit:** dc732a0 — docs: session wrap — voice agent plan, CURRENT_PLAN archived
+**Next action:** Build `george_mcp.py` MCP server exposing george_edit, george_query, server_health, server_profile — register in ~/.claude/settings.json; then start GrainMesh Session 1 using ARCHITECT_MODE.md protocol
+**Blocked on:** nothing
+**Open questions:** (1) MCP server transport: stdio vs SSE? (2) george_edit timeout — aider on 14b can take 30–60s per task. (3) STT Phase 1 still queued.
 **Tests:** pass (32/32)

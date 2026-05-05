@@ -3,6 +3,6 @@
 > Cleared at start of every session. Carry-over summary written as first entry.
 > Format: bullet points, max 5 lines per topic, no prose.
 
-## Carried over: Session 13 (2026-05-06) summary
+## Carried over: Session 14 (2026-05-06) summary
 
-Session 13 was a short planning session. No code changed. Created `FUTURE_PLAN.md` documenting the four-phase local voice agent: Phase 1 STT (Whisper via OVModelForSpeechSeq2Seq, `/v1/audio/transcriptions`), Phase 2 TTS (Piper on CPU first, Kokoro-82M upgrade path, `/v1/audio/speech`), Phase 3 news scraper (feedparser + trafilatura, background refresh, `/v1/news/*`), Phase 4 Python voice client (sounddevice + VAD loop). VRAM budget confirmed: Whisper large-v3-turbo ~1.5 GB + qwen3-14b ~9 GB + KV 3 GB = ~14 GB, fits B60 on speed profile. Archived `CURRENT_PLAN.md` → `ARCHIVE_PLAN_2026-05-04.md` (historical only). No open blockers; user decides when to start Phase 1.
+Session 14 was a tooling and workflow design session. No ov_server code changed. Benchmarked t/s: qwen3-8b 23–31 t/s, qwen3-14b 14 t/s, coder-14b 11 t/s. Installed aider into ov_env; added `aider` and `george` aliases to ~/.bashrc (george defaults to qwen3-14b + --edit-format diff). Tested aider on GrainMesh — worked but introduced a `1.:0` SQL bug via whole-format truncation; reverted 4 commits. Designed Architect+George two-agent protocol (TASK_LEDGER.md in EternalGrain, ARCHITECT_MODE.md written). Planned MCP server (`george_mcp.py`) to expose george and ov_server as first-class Claude Code tools — deferred to next session. Server switched to document profile (12GB KV) during session; may need switching back to speed.
