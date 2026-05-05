@@ -782,23 +782,32 @@ async def _apply_profile(name: str) -> None:
             if stats.active_requests > 0:
                 log.warning(f"Profile switch proceeding with {stats.active_requests} active request(s) still in flight")
 
-            # Evict all LLMs and VLMs
-            async with _model_lock:
-                for mid in list(loaded_models):
-                    del loaded_models[mid]
-                    del loaded_tokenizers[mid]
-                    model_last_used.pop(mid, None)
-                    _vram_allocated.pop(mid, None)
+            new_kv     = prof.get("kv_cache_size_gb", _cfg["kv_cache_size_gb"])
+            kv_changed = new_kv != _cfg.get("kv_cache_size_gb")
+
+            # VLMs are always evicted — loaded on-demand, not profile-specific
             async with _vlm_lock:
                 for mid in list(loaded_vlm_models):
                     del loaded_vlm_models[mid]
                     del loaded_vlm_tokenizers[mid]
                     model_last_used.pop(mid, None)
                     _vram_allocated.pop(mid, None)
+
+            # LLMs: evict only when KV budget changes — it is baked into LLMPipeline
+            # at construction time and cannot be changed on a live pipeline.
+            if kv_changed:
+                async with _model_lock:
+                    for mid in list(loaded_models):
+                        del loaded_models[mid]
+                        del loaded_tokenizers[mid]
+                        model_last_used.pop(mid, None)
+                        _vram_allocated.pop(mid, None)
+                log.info(f"KV budget {_cfg['kv_cache_size_gb']}→{new_kv} GB — all LLMs evicted")
+
             gc.collect()
 
             # Apply new settings to live config
-            _cfg["kv_cache_size_gb"]  = prof.get("kv_cache_size_gb",  _cfg["kv_cache_size_gb"])
+            _cfg["kv_cache_size_gb"]  = new_kv
             _cfg["max_loaded_models"] = prof.get("max_loaded_models", _cfg["max_loaded_models"])
             MAX_LOADED_MODELS = _cfg["max_loaded_models"]
             _cfg.setdefault("routing", {})["default"] = prof.get("routing_default", "local")
@@ -809,10 +818,17 @@ async def _apply_profile(name: str) -> None:
             if new_agent and new_agent in AVAILABLE_MODELS:
                 AGENT_MODEL = new_agent
 
+            # Trim to new model-count limit via LRU if we kept existing models
+            if not kv_changed:
+                async with _model_lock:
+                    while len(loaded_models) > MAX_LOADED_MODELS:
+                        _evict_lru()
+
             _active_profile = name
             log.info(
                 f"Profile '{name}' active — kv={_cfg['kv_cache_size_gb']}GB "
                 f"max_models={MAX_LOADED_MODELS} routing={_cfg['routing']['default']}"
+                + ("" if kv_changed else " (LLMs retained)")
             )
             if AGENT_MODEL:
                 asyncio.create_task(_warm_model(AGENT_MODEL))
