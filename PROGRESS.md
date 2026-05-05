@@ -75,11 +75,21 @@
 
 ---
 
+### 2026-05-05 — Session 8 (b7221c3)
+**Working on:** Profile switching + ov_monitor Profiles panel + segmented VRAM bar
+**Last commit:** b7221c3 — feat: profile switching — POST /admin/profile + /health fields
+**Next action:** hashtag routing — `_pick_backend()` patch + `~/.claude/hooks/route-selector.sh`; code in CLAUDE_CODE_INTEGRATION.md §3a–§3b
+**Blocked on:** nothing
+**Open questions:** Step 10 (AnthropicBackend) deferred until ANTHROPIC_API_KEY available
+**Tests:** pass (32/32)
+
+---
+
 ## NOW
 
-**Working on:** Profile switching — POST /admin/profile + ov_monitor Profiles panel (complete, not yet committed)
-**Last commit:** 25779eb — fix: VRAM eviction, KV cache budget, model preloading
-**Next action:** commit current changes; then decide on hashtag routing vs. live testing the profile panel
+**Working on:** Hashtag routing (next up)
+**Last commit:** b7221c3 — feat: profile switching — POST /admin/profile + /health fields
+**Next action:** `_pick_backend()` patch in ov_server.py + `~/.claude/hooks/route-selector.sh`; full code in CLAUDE_CODE_INTEGRATION.md §3a–§3b
 **Blocked on:** nothing
 **Open questions:** Step 10 (AnthropicBackend) deferred until ANTHROPIC_API_KEY available
 **Tests:** pass (32/32)
