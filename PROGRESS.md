@@ -65,11 +65,21 @@
 
 ---
 
+### 2026-05-05 — Session 7 (TBD)
+**Working on:** VRAM eviction bugs + model preloading + KV cache budget fix
+**Last commit:** 23bd54d — docs: session wrap — AnythingLLM agent pipeline restored, _record_stats cleanup
+**Next action:** Hashtag routing — `_pick_backend()` patch + `~/.claude/hooks/route-selector.sh`; code in CLAUDE_CODE_INTEGRATION.md §3a–§3b
+**Blocked on:** nothing
+**Open questions:** Step 10 (AnthropicBackend) deferred until ANTHROPIC_API_KEY available
+**Tests:** pass (32/32)
+
+---
+
 ## NOW
 
-**Working on:** Hashtag routing (deferred from Session 5) — no new blockers
-**Last commit:** 64e8863 — refactor: extract _record_stats(); guard empty tokenization in agent path
-**Next action:** Server patch — top of `_pick_backend()` in ov_server.py; then create `~/.claude/hooks/route-selector.sh`; code in CLAUDE_CODE_INTEGRATION.md §3a–§3b
+**Working on:** Hashtag routing (next logical step)
+**Last commit:** TBD — session wrap commit
+**Next action:** `_pick_backend()` patch in ov_server.py; then `~/.claude/hooks/route-selector.sh`; full code in CLAUDE_CODE_INTEGRATION.md §3a–§3b
 **Blocked on:** nothing
 **Open questions:** Step 10 (AnthropicBackend) deferred until ANTHROPIC_API_KEY available
 **Tests:** pass (32/32)

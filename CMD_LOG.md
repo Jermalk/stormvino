@@ -116,3 +116,26 @@ sleep 4 && kill -USR1 $(systemctl show ov-server --property=MainPID --value)
 systemctl restart ov-server
 sleep 4 && kill -USR1 $(systemctl show ov-server --property=MainPID --value)
 ```
+
+## 2026-05-05 — VRAM eviction bug fixes
+```
+# Bugs fixed:
+# 1. _evict_lru(): added gc.collect() so LLMPipeline destructor runs before next vram_free_gb() query
+# 2. get_model() soft cap: if → while + re-query after each eviction
+# 3. get_vlm() inline VLM eviction: added gc.collect()
+# 4. get_vlm() LLM eviction: if → while + re-query after each eviction
+python -m py_compile /opt/ov_server/ov_server.py  # OK
+systemctl restart ov-server
+curl -s http://localhost:11435/health | python3 -m json.tool
+```
+
+## 2026-05-05 — Model preloading
+```
+# Added: startup preload of AGENT_MODEL (qwen3-8b) + speculative preload of
+# DEFAULT_MODEL (qwen3-14b) on tool_calls detection in both streaming/non-streaming paths.
+# _warm_model() helper is fire-and-forget; exceptions logged, never raised.
+python -m py_compile /opt/ov_server/ov_server.py  # OK
+systemctl restart ov-server
+# Watch startup preload in logs:
+journalctl -u ov-server -f
+```

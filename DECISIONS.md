@@ -82,3 +82,33 @@
 **Rationale:** qwen3-8b follows "respond in JSON" less strictly than the original qwen2.5-3b; it wraps JSON in prose or generates prose-only responses. Extraction recovers embedded JSON; empty return lets AnythingLLM fall back to the 14b immediately (~3s) instead of waiting 16s.
 **Rejected alternative:** Switch agent_model back to qwen2.5-3b — model no longer on disk.
 **Affects:** `_extract_agent_json()` + `agent_stream()` in ov_server.py.
+
+### 2026-05-05 — vram_free_gb() uses internal allocation tracking
+**Decision:** Replaced live OpenVINO GPU_MEMORY_STATISTICS query with internal `_vram_allocated` dict; `_TOTAL_VRAM_GB` queried once at startup via a fresh Core().
+**Rationale:** A fresh `ov.Core()` instance always reports zero allocations for memory held by other instances in the same process — the original query always returned the full 22.71 GB, meaning the soft VRAM cap never fired.
+**Rejected alternative:** Share one global Core() instance — Core() is not async-safe and would require a lock; internal tracking is simpler and sufficient.
+**Affects:** `vram_free_gb()`, `_init_vram()`, `_evict_lru()`, `get_model()`, `get_vlm()` in ov_server.py.
+
+### 2026-05-05 — kv_cache_size_gb reduced from 8 to 3
+**Decision:** Set `kv_cache_size_gb: 3` in config.json (was 8 in DEFAULTS, absent from config).
+**Rationale:** At 8 GB per pipeline, two models simultaneously loaded consumed 4.5+8+9.1+8=29.6 GB against 22.71 GB total — driver was spilling to system RAM. At 3 GB: 4.5+3+9.1+3=19.6 GB, leaving 3.1 GB free (above 1.5 GB headroom). 3 GB KV still gives ~10 K-token context for 8b and ~7.5 K for 14b — sufficient for tool selection and web-search summarisation.
+**Rejected alternative:** Keep 8 GB, drop max_loaded_models to 1 — eliminates the warm-14b speculative preload benefit.
+**Affects:** config.json, `get_scheduler_config()` in ov_server.py.
+
+### 2026-05-05 — gc.collect() after model eviction
+**Decision:** `_evict_lru()` and the inline VLM eviction block in `get_vlm()` call `gc.collect()` immediately after `del` of the pipeline object.
+**Rationale:** Python's GC does not run synchronously on `del`; the LLMPipeline C++ destructor (which releases VRAM) only runs when the object is collected. Without `gc.collect()`, `vram_free_gb()` queried immediately after eviction would still see the old allocation — causing under-eviction and VRAM overflow.
+**Rejected alternative:** Rely on eventual GC — unpredictable timing; VRAM could remain allocated for many seconds while a new model is loaded on top.
+**Affects:** `_evict_lru()`, `get_vlm()` in ov_server.py.
+
+### 2026-05-05 — Speculative 14b preload on agent tool_calls
+**Decision:** When agent_stream() or the non-streaming agent path detects `tool_calls` in the response, fire `asyncio.create_task(_warm_model(DEFAULT_MODEL))` before returning.
+**Rationale:** AnythingLLM web-search round-trips take 5–10 s; preloading 14b during that window means it is ready (or nearly ready) when the summarisation request arrives. The `_model_lock` serialises correctly — the task queues behind any in-progress load and is a cache-hit no-op if 14b is already loaded.
+**Rejected alternative:** Always keep 14b preloaded at startup — doubles idle VRAM usage; speculative preload only occupies VRAM when 14b is actually needed.
+**Affects:** `chat()` agent_stream() and non-streaming branch in ov_server.py; new `_warm_model()` helper.
+
+### 2026-05-05 — AGENT_MODEL preloaded at startup via on_event("startup")
+**Decision:** `@app.on_event("startup")` fires `asyncio.create_task(_warm_model(AGENT_MODEL))` so qwen3-8b is in VRAM before the first AnythingLLM request arrives.
+**Rationale:** First agent tool-selection call was waiting 24–44 s for 8b to load; startup preload eliminates this cold-start penalty. From OV cache the load completes in ~2 s, so the server is ready almost immediately.
+**Rejected alternative:** lifespan context manager — requires restructuring app creation; on_event("startup") is simpler with no behaviour difference for this use case despite the deprecation warning.
+**Affects:** ov_server.py — startup event, `_warm_model()` helper.

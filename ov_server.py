@@ -6,7 +6,7 @@ from optimum.intel import OVModelForFeatureExtraction
 from transformers import AutoProcessor, AutoTokenizer
 from abc import ABC, abstractmethod
 import base64, io, urllib.request
-import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal, ctypes, contextvars
+import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal, ctypes, contextvars, gc
 from PIL import Image
 from pathlib import Path
 from functools import partial
@@ -245,7 +245,14 @@ _emb_lock = asyncio.Lock()
 
 loaded_vlm_models: Dict[str, ov_genai.VLMPipeline] = {}
 loaded_vlm_tokenizers: Dict[str, AutoTokenizer] = {}
+
+# VRAM tracking — total queried once at startup; per-model allocation maintained internally.
+# Using internal accounting because a fresh ov.Core() sees zero allocations from other instances.
+_TOTAL_VRAM_GB: Optional[float] = None
+_vram_allocated: Dict[str, float] = {}   # model_id → estimated GB on GPU
 _vlm_lock = asyncio.Lock()
+
+_init_vram()   # populate _TOTAL_VRAM_GB at import time (quick property query, no model load)
 _vlm_infer_locks: Dict[str, asyncio.Lock] = {}
 
 
@@ -575,18 +582,26 @@ def model_size_gb(model_id: str) -> float:
     return sum(f.stat().st_size for f in Path(path).rglob("*") if f.is_file()) / 1024 ** 3
 
 
-def vram_free_gb() -> Optional[float]:
-    """Query free VRAM from OpenVINO. Returns None if unavailable."""
+def _init_vram() -> None:
+    """Query GPU total VRAM once at startup and store in _TOTAL_VRAM_GB."""
+    global _TOTAL_VRAM_GB
     try:
         import openvino as ov
         core = ov.Core()
-        stats = core.get_property(DEVICE, "GPU_MEMORY_STATISTICS")
         total = core.get_property(DEVICE, "GPU_DEVICE_TOTAL_MEM_SIZE")
-        used = sum(v for k, v in stats.items() if "current" in k.lower())
-        return (total - used) / 1024 ** 3
-    except Exception as e:
-        log.debug(f"VRAM query failed: {e}")
+        _TOTAL_VRAM_GB = total / 1024 ** 3
+        log.info(f"{DEVICE} total VRAM: {_TOTAL_VRAM_GB:.2f} GB")
+    except Exception as exc:
+        log.warning(f"VRAM total query failed: {exc} — soft VRAM cap disabled")
+
+
+def vram_free_gb() -> Optional[float]:
+    """Estimated free VRAM from internal allocation tracking (not a live GPU query).
+    A fresh ov.Core() always reports zero usage for allocations made by other instances,
+    so we maintain our own accounting instead."""
+    if _TOTAL_VRAM_GB is None:
         return None
+    return _TOTAL_VRAM_GB - sum(_vram_allocated.values())
 
 
 def _evict_lru() -> None:
@@ -595,6 +610,8 @@ def _evict_lru() -> None:
     del loaded_models[lru]
     del loaded_tokenizers[lru]
     model_last_used.pop(lru, None)
+    _vram_allocated.pop(lru, None)
+    gc.collect()
 
 
 # ---------------------------------------------------------------------------
@@ -617,13 +634,14 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
         while len(loaded_models) >= MAX_LOADED_MODELS:
             _evict_lru()
 
-        # Soft cap: evict LRU if new model would exceed VRAM headroom
+        # Soft cap: evict LRU until VRAM headroom is satisfied (re-query after each eviction)
         size = model_size_gb(model_id)
         free = vram_free_gb()
         if free is not None:
-            if free - size < VRAM_HEADROOM_GB and loaded_models:
+            while free - size < VRAM_HEADROOM_GB and loaded_models:
                 log.info(f"VRAM free={free:.1f}GB, model={size:.1f}GB, headroom={VRAM_HEADROOM_GB}GB — evicting LRU")
                 _evict_lru()
+                free = vram_free_gb()
         else:
             log.debug("VRAM query unavailable — relying on model count limit only")
 
@@ -642,7 +660,10 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
             loaded_models[model_id] = pipe
             loaded_tokenizers[model_id] = tokenizer
             model_last_used[model_id] = time.time()
-            log.info(f"Loaded {model_id}")
+            _vram_allocated[model_id] = model_size_gb(model_id) + _cfg.get("kv_cache_size_gb", 8)
+            free_after = vram_free_gb()
+            log.info(f"Loaded {model_id} | VRAM allocated: {_vram_allocated[model_id]:.1f}GB"
+                     + (f", free: {free_after:.1f}GB" if free_after is not None else ""))
         except Exception as e:
             log.error(f"Failed to load {model_id}: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -690,13 +711,17 @@ async def get_vlm(model_id: str) -> Tuple[ov_genai.VLMPipeline, AutoTokenizer]:
             del loaded_vlm_models[lru]
             del loaded_vlm_tokenizers[lru]
             model_last_used.pop(lru, None)
+            _vram_allocated.pop(lru, None)
+            gc.collect()
 
-        # Evict an LLM if VRAM is tight
+        # Evict LLMs until VRAM headroom is satisfied (re-query after each eviction)
         size = model_size_gb(model_id)
         free = vram_free_gb()
-        if free is not None and free - size < VRAM_HEADROOM_GB and loaded_models:
-            log.info(f"VRAM free={free:.1f}GB, VLM={size:.1f}GB — evicting LRU LLM")
-            _evict_lru()
+        if free is not None:
+            while free - size < VRAM_HEADROOM_GB and loaded_models:
+                log.info(f"VRAM free={free:.1f}GB, VLM={size:.1f}GB — evicting LRU LLM")
+                _evict_lru()
+                free = vram_free_gb()
 
         log.info(f"Loading VLM {model_id} (~{size:.1f}GB)...")
         try:
@@ -712,12 +737,24 @@ async def get_vlm(model_id: str) -> Tuple[ov_genai.VLMPipeline, AutoTokenizer]:
             loaded_vlm_models[model_id] = pipe
             loaded_vlm_tokenizers[model_id] = tokenizer
             model_last_used[model_id] = time.time()
-            log.info(f"Loaded VLM {model_id}")
+            _vram_allocated[model_id] = model_size_gb(model_id)
+            free_after = vram_free_gb()
+            log.info(f"Loaded VLM {model_id} | VRAM allocated: {_vram_allocated[model_id]:.1f}GB"
+                     + (f", free: {free_after:.1f}GB" if free_after is not None else ""))
         except Exception as exc:
             log.error(f"Failed to load VLM {model_id}: {exc}")
             raise HTTPException(status_code=500, detail=str(exc))
 
     return loaded_vlm_models[model_id], loaded_vlm_tokenizers[model_id]
+
+
+async def _warm_model(model_id: str) -> None:
+    """Fire-and-forget preload helper — exceptions are logged, never raised."""
+    try:
+        await get_model(model_id)
+        log.info(f"Preload complete: {model_id}")
+    except Exception as exc:
+        log.warning(f"Preload failed for {model_id}: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -752,6 +789,13 @@ class EmbeddingRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+@app.on_event("startup")
+async def _startup_preload() -> None:
+    if AGENT_MODEL:
+        log.info(f"Scheduling startup preload of agent model '{AGENT_MODEL}'")
+        asyncio.create_task(_warm_model(AGENT_MODEL))
+
+
 @app.get("/health")
 async def health():
     ram = psutil.virtual_memory()
@@ -770,6 +814,9 @@ async def health():
         "loaded_models":     list(loaded_models.keys()),
         "loaded_vlm_models": list(loaded_vlm_models.keys()),
         "embedding_loaded":  emb_model is not None,
+        "vram_total_gb":     round(_TOTAL_VRAM_GB, 2) if _TOTAL_VRAM_GB else None,
+        "vram_allocated_gb": {k: round(v, 2) for k, v in _vram_allocated.items()},
+        "vram_free_gb":      round(vram_free_gb(), 2) if vram_free_gb() is not None else None,
         "router": {
             "default":   _cfg.get("routing", {}).get("default", "local"),
             "backends":  list(_backends.keys()),
@@ -981,6 +1028,11 @@ async def chat(req: ChatRequest):
                 _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
 
                 if tool_calls:
+                    # Speculatively start loading the summarisation model while
+                    # AnythingLLM executes the tool — web search takes 5-10s,
+                    # giving the 14b load a head start before it is needed.
+                    if DEFAULT_MODEL and DEFAULT_MODEL != model_id:
+                        asyncio.create_task(_warm_model(DEFAULT_MODEL))
                     delta = {"tool_calls": tool_calls}
                     finish_reason = "tool_calls"
                 else:
@@ -1091,6 +1143,8 @@ async def chat(req: ChatRequest):
         tool_calls, answer = parse_tool_calls(answer)
 
         if tool_calls:
+            if DEFAULT_MODEL and DEFAULT_MODEL != model_id:
+                asyncio.create_task(_warm_model(DEFAULT_MODEL))
             message = {"role": "assistant", "content": None, "tool_calls": tool_calls}
             finish_reason = "tool_calls"
         else:

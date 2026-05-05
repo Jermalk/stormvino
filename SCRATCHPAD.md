@@ -3,16 +3,11 @@
 > Cleared at start of every session. Carry-over summary written as first entry.
 > Format: bullet points, max 5 lines per topic, no prose.
 
-## Carried over: Session 2026-05-04 (Session 6) summary
+## Carried over: Session 2026-05-05 (Session 7) summary
 
-Session 6 diagnosed and fixed AnythingLLM agentic mode. Root cause: qwen3-8b generates
-prose instead of strict JSON (unlike original qwen2.5-3b). Three fixes: (1) agent streaming
-now buffers internally and strips `<think>` before emitting; (2) `_extract_agent_json()`
-scans prose for embedded JSON, returns `""` on miss for fast fallback; (3) `_record_stats()`
-extracted from 7 inline duplicate blocks. Agent pipeline confirmed working: 30 tokens/3.2s
-per tool-selection call, full web-search + 14b summarization chain running.
+Session 7 fixed three layers of VRAM management bugs and added model preloading. (1) `_evict_lru()` and VLM inline eviction now call `gc.collect()` so the C++ destructor runs before the next VRAM query. (2) Soft VRAM cap changed from `if` to `while` with re-query after each eviction. (3) `vram_free_gb()` was fundamentally broken — a fresh `ov.Core()` always shows zero usage; replaced with internal `_vram_allocated` tracking + `_TOTAL_VRAM_GB` queried once at startup. (4) `kv_cache_size_gb` reduced 8→3 in config.json (two loaded models were consuming 29.6 GB against 22.71 GB total). (5) Startup preload of qwen3-8b via `@app.on_event("startup")`; speculative preload of qwen3-14b fired when agent returns tool_calls. VRAM state now visible in `/health` response. Tests: 32/32.
 
-## Hashtag routing — implementation plan (deferred from Session 5)
+## Hashtag routing — implementation plan (carried from Session 5, still pending)
 
 - Server patch: top of `_pick_backend()` in ov_server.py — read `/tmp/ov_routing_override.json`;
   check `expires > time.time()`; get `backend` + `fallback` keys; return `_backends.get(name) or _backends.get(fallback) or _backends["local"]`; log at INFO; catch all exceptions silently.
@@ -25,4 +20,5 @@ per tool-selection call, full web-search + 14b summarization chain running.
 ## Misc facts
 
 - Test venv: `/home/jerzy/ov_env` — `source /home/jerzy/ov_env/bin/activate && python -m pytest /opt/ov_server/tests/ -q`
-- Debug logging currently ON — disable with `kill -USR1 $(systemctl show ov-server --property=MainPID --value)`
+- Debug logging still ON — disable with `kill -USR1 $(systemctl show ov-server --property=MainPID --value)`
+- on_event("startup") deprecation warning is harmless — FastAPI still honours it
