@@ -6,10 +6,22 @@ Imported by ov_server.py to add /v1/messages routes.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union
 
 import openvino_genai as ov_genai
 from pydantic import BaseModel, ConfigDict
+
+
+# Minimal message container — duck-typed to match ov_server.Message for build_prompt().
+# Defined here to avoid importing ov_server (which causes a full module re-init when
+# the server runs as __main__ and ov_server isn't in sys.modules).
+@dataclass
+class _Msg:
+    role: str
+    content: str = ""
+    tool_call_id: Optional[str] = None
+    name: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -88,11 +100,8 @@ def _resolve_thinking(param: Optional[Union[bool, AnthropicThinking]]) -> bool:
 
 
 def _anthropic_to_messages(req: AnthropicRequest) -> list:
-    """Convert AnthropicRequest to the internal Message list used by build_prompt().
-    Returns plain dicts-compatible objects — actual Message model imported at call site."""
-    from ov_server import Message  # imported here to avoid circular import at module level
-
-    msgs: List[Message] = []
+    """Convert AnthropicRequest to _Msg list compatible with build_prompt()."""
+    msgs: List[_Msg] = []
 
     if req.system:
         if isinstance(req.system, str):
@@ -101,17 +110,17 @@ def _anthropic_to_messages(req: AnthropicRequest) -> list:
             sys_text = " ".join(
                 b.text for b in req.system if b.type == "text" and b.text
             )
-        msgs.append(Message(role="system", content=sys_text))
+        msgs.append(_Msg(role="system", content=sys_text))
 
     for m in req.messages:
         if isinstance(m.content, str):
-            msgs.append(Message(role=m.role, content=m.content))
+            msgs.append(_Msg(role=m.role, content=m.content))
         else:
             text_parts = [p.text for p in m.content if p.type == "text" and p.text]
             tool_result = next(
                 (p for p in m.content if p.type == "tool_result"), None
             )
-            msgs.append(Message(
+            msgs.append(_Msg(
                 role=m.role,
                 content=" ".join(text_parts) if text_parts else "",
                 tool_call_id=tool_result.tool_use_id if tool_result else None,
