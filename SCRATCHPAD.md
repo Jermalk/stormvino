@@ -3,13 +3,9 @@
 > Cleared at start of every session. Carry-over summary written as first entry.
 > Format: bullet points, max 5 lines per topic, no prose.
 
-## Carried over: Session 2026-05-05 (Session 7) summary
+## Carried over: Session 2026-05-05 (Session 9) summary
 
-Session 7 fixed three layers of VRAM management bugs and added model preloading. (1) `_evict_lru()` and VLM inline eviction now call `gc.collect()` so the C++ destructor runs before the next VRAM query. (2) Soft VRAM cap changed from `if` to `while` with re-query after each eviction. (3) `vram_free_gb()` was fundamentally broken — a fresh `ov.Core()` always shows zero usage; replaced with internal `_vram_allocated` tracking + `_TOTAL_VRAM_GB` queried once at startup. (4) `kv_cache_size_gb` reduced 8→3 in config.json (two loaded models were consuming 29.6 GB against 22.71 GB total). (5) Startup preload of qwen3-8b via `@app.on_event("startup")`; speculative preload of qwen3-14b fired when agent returns tool_calls. VRAM state now visible in `/health` response. Tests: 32/32.
-
-## Session 8 summary (2026-05-05)
-
-Profile switching and ov_monitor control panel shipped and user-confirmed working, including graceful wait during active inference. `POST /admin/profile` → 202, `_apply_profile()` drains in-flight requests then evicts/reloads. `/health` gained `active_profile`, `profile_switching`, `kv_cache_size_gb`. ov_monitor gained Profiles panel (1/2/3 keypresses via KeypressThread setcbreak) and segmented VRAM bar (█=weights, ▓=KV, ░=free, colored per model). Both repos committed.
+Session 9 fixed and polished profile switching. (1) `_apply_profile()` now evicts VLMs always but evicts LLMs only when `kv_cache_size_gb` changes — avoids unnecessary reload on speed→ovh switch. (2) ov_monitor server panel gained VLM loaded row. (3) Segmented VRAM bar fixed for VLM models (no KV segment subtracted; legend shows "X.XGB VLM"). (4) `kv_cache_size_gb` added to `/health` and shown in monitor KV cache row. Both repos committed, 32/32 tests pass.
 
 ## Hashtag routing — implementation plan (carried from Session 5, still pending)
 

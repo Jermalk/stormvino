@@ -85,10 +85,20 @@
 
 ---
 
+### 2026-05-05 — Session 9 (91870ec)
+**Working on:** Profile switching bugfixes — VLM eviction on switch, VLM in monitor panel, segmented VRAM bar VLM correction, smart KV-aware eviction
+**Last commit:** 91870ec — fix: only evict LLMs on profile switch when KV budget changes
+**Next action:** hashtag routing — `_pick_backend()` patch + `~/.claude/hooks/route-selector.sh`; code in CLAUDE_CODE_INTEGRATION.md §3a–§3b
+**Blocked on:** nothing
+**Open questions:** Step 10 (AnthropicBackend) deferred until ANTHROPIC_API_KEY available
+**Tests:** pass (32/32)
+
+---
+
 ## NOW
 
 **Working on:** Hashtag routing (next up)
-**Last commit:** b7221c3 — feat: profile switching — POST /admin/profile + /health fields
+**Last commit:** 91870ec — fix: only evict LLMs on profile switch when KV budget changes
 **Next action:** `_pick_backend()` patch in ov_server.py + `~/.claude/hooks/route-selector.sh`; full code in CLAUDE_CODE_INTEGRATION.md §3a–§3b
 **Blocked on:** nothing
 **Open questions:** Step 10 (AnthropicBackend) deferred until ANTHROPIC_API_KEY available

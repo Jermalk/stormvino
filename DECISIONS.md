@@ -107,6 +107,18 @@
 **Rejected alternative:** Always keep 14b preloaded at startup — doubles idle VRAM usage; speculative preload only occupies VRAM when 14b is actually needed.
 **Affects:** `chat()` agent_stream() and non-streaming branch in ov_server.py; new `_warm_model()` helper.
 
+### 2026-05-05 — Profile switching: POST /admin/profile async with 202
+**Decision:** `POST /admin/profile` returns 202 immediately and fires `_apply_profile()` as a background task; monitor polls `/health` for `active_profile` and `profile_switching` to show live state.
+**Rationale:** Model reload takes 2–10 s; a synchronous endpoint would exceed HTTP client timeouts and leave the server unresponsive during the switch. Async + poll keeps the server responsive and the monitor can show a SWITCHING indicator.
+**Rejected alternative:** Synchronous 200 after reload completes — HTTP timeout risk; server unresponsive during switch.
+**Affects:** ov_server.py — `set_profile()`, `_apply_profile()`, `/health`; ov_monitor.py — `make_profiles_panel()`, `KeypressThread`.
+
+### 2026-05-05 — Profile switch evicts LLMs only when KV budget changes
+**Decision:** `_apply_profile()` skips LLM eviction when `kv_cache_size_gb` is unchanged between old and new profile; VLMs are always evicted.
+**Rationale:** `kv_cache_size_gb` is baked into `LLMPipeline` at construction and cannot be changed live — it is the only hard reason to evict. Keeping LLMs when KV stays the same (e.g. speed→ovh, both 3 GB) avoids an unnecessary reload cycle and preserves warm models.
+**Rejected alternative:** Always evict all models on any profile switch — simple but wastes ~5s reload time when KV budget hasn't changed.
+**Affects:** ov_server.py — `_apply_profile()`.
+
 ### 2026-05-05 — AGENT_MODEL preloaded at startup via on_event("startup")
 **Decision:** `@app.on_event("startup")` fires `asyncio.create_task(_warm_model(AGENT_MODEL))` so qwen3-8b is in VRAM before the first AnythingLLM request arrives.
 **Rationale:** First agent tool-selection call was waiting 24–44 s for 8b to load; startup preload eliminates this cold-start penalty. From OV cache the load completes in ~2 s, so the server is ready almost immediately.
