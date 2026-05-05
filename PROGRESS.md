@@ -125,11 +125,21 @@
 
 ---
 
+### 2026-05-06 — Session 13 (dc732a0)
+**Working on:** Voice agent future plan — FUTURE_PLAN.md created; CURRENT_PLAN.md archived
+**Last commit:** be66be7 — docs: session wrap — CC functional, latency 3m→40s, prefix caching confirmed
+**Next action:** Start Phase 1 (STT) when user is ready — see FUTURE_PLAN.md § Phase 1
+**Blocked on:** nothing
+**Open questions:** (1) Kokoro-82M ONNX→OpenVINO path untested. (2) Simultaneous STT+LLM GPU contention strategy.
+**Tests:** pass (32/32)
+
+---
+
 ## NOW
 
-**Working on:** Claude Code integration — functional and in use
-**Last commit:** 68714ba — perf: prefix caching + unified CC model map cuts latency from 3m to ~40s warm
-**Next action:** No blocking issue. If latency becomes unacceptable, investigate KV prefix cache persistence across long turns (see open questions above).
-**Blocked on:** nothing
-**Open questions:** (1) Prefix cache misses after long generations (>500 tok output) — likely KV block eviction under pressure. (2) Empty `<think></think>` blocks in stream output — cosmetic, not breaking CC.
+**Working on:** Voice agent future plan documented; ready for Phase 1 (STT) whenever user decides
+**Last commit:** dc732a0 — docs: session wrap — voice agent plan, CURRENT_PLAN archived
+**Next action:** Phase 1 STT — convert Whisper via optimum-cli, add OVModelForSpeechSeq2Seq, implement POST /v1/audio/transcriptions (see FUTURE_PLAN.md § Phase 1)
+**Blocked on:** nothing — user decides when to start
+**Open questions:** (1) Whisper model size choice: small (fast) vs large-v3-turbo (accurate). (2) Kokoro-82M vs Piper for TTS. (3) Simultaneous STT+LLM requests: serialise or queue?
 **Tests:** pass (32/32)

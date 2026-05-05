@@ -3,6 +3,6 @@
 > Cleared at start of every session. Carry-over summary written as first entry.
 > Format: bullet points, max 5 lines per topic, no prose.
 
-## Carried over: Session 12 (2026-05-06) summary
+## Carried over: Session 13 (2026-05-06) summary
 
-Session 12 fixed the 3-minute hang and reduced latency to ~40-55s first-response. Root fix (session 11): circular import in anthropic_layer._anthropic_to_messages caused module re-init during inference. This session: (1) stripped tool JSON schemas from CC requests (53K→26K tokens), (2) unified all claude-* CC routes to qwen3-14b-int4-ov eliminating haiku/sonnet eviction cycle, (3) enabled prefix caching (proven 39.5s→0.4s on warm requests), (4) capped max_new_tokens at 8192 for CC. CC is now functional: directory listing, file read, code explanation all work. Hard floor is ~40s first turn (26K token system prompt on 14B model). Prefix cache helps internal haiku calls (0.4s) but seems to miss after long generations (881-token response followed by full 47s prefill on next turn — likely KV block pressure).
+Session 13 was a short planning session. No code changed. Created `FUTURE_PLAN.md` documenting the four-phase local voice agent: Phase 1 STT (Whisper via OVModelForSpeechSeq2Seq, `/v1/audio/transcriptions`), Phase 2 TTS (Piper on CPU first, Kokoro-82M upgrade path, `/v1/audio/speech`), Phase 3 news scraper (feedparser + trafilatura, background refresh, `/v1/news/*`), Phase 4 Python voice client (sounddevice + VAD loop). VRAM budget confirmed: Whisper large-v3-turbo ~1.5 GB + qwen3-14b ~9 GB + KV 3 GB = ~14 GB, fits B60 on speed profile. Archived `CURRENT_PLAN.md` → `ARCHIVE_PLAN_2026-05-04.md` (historical only). No open blockers; user decides when to start Phase 1.

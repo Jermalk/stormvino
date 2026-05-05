@@ -142,3 +142,9 @@
 **Rationale:** First agent tool-selection call was waiting 24–44 s for 8b to load; startup preload eliminates this cold-start penalty. From OV cache the load completes in ~2 s, so the server is ready almost immediately.
 **Rejected alternative:** lifespan context manager — requires restructuring app creation; on_event("startup") is simpler with no behaviour difference for this use case despite the deprecation warning.
 **Affects:** ov_server.py — startup event, `_warm_model()` helper.
+
+### 2026-05-06 — FUTURE_PLAN.md for voice agent; CURRENT_PLAN.md archived
+**Decision:** Document the STT/TTS/news-scraper voice agent as a future plan in `FUTURE_PLAN.md`; rename `CURRENT_PLAN.md` to `ARCHIVE_PLAN_2026-05-04.md`.
+**Rationale:** `CURRENT_PLAN.md` contained only completed Phase 0–N steps from sessions 1–4 — no live action items. `FUTURE_PLAN.md` captures the new project direction (local voice loop: Whisper STT → qwen3-14b LLM → Piper/Kokoro TTS → sounddevice client + RSS news injector) in a format ready to drive implementation sessions.
+**Rejected alternative:** Extending CURRENT_PLAN.md in place — misleading name; mixing completed history with future work obscures status.
+**Affects:** FUTURE_PLAN.md (new), ARCHIVE_PLAN_2026-05-04.md (renamed from CURRENT_PLAN.md)
