@@ -77,9 +77,9 @@
 
 ## NOW
 
-**Working on:** Hashtag routing (next logical step)
+**Working on:** Profile switching — POST /admin/profile + ov_monitor Profiles panel (complete, not yet committed)
 **Last commit:** 25779eb — fix: VRAM eviction, KV cache budget, model preloading
-**Next action:** `_pick_backend()` patch in ov_server.py; then `~/.claude/hooks/route-selector.sh`; full code in CLAUDE_CODE_INTEGRATION.md §3a–§3b
+**Next action:** commit current changes; then decide on hashtag routing vs. live testing the profile panel
 **Blocked on:** nothing
 **Open questions:** Step 10 (AnthropicBackend) deferred until ANTHROPIC_API_KEY available
 **Tests:** pass (32/32)

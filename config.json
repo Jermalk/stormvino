@@ -35,5 +35,10 @@
     "max_new_tokens_default": 2048,
     "max_new_tokens_agent":   500,
     "vlm_max_image_turns":    1,
-    "vlm_max_image_side_px":  1280
+    "vlm_max_image_side_px":  1280,
+    "profiles": {
+        "speed":    { "max_loaded_models": 2, "kv_cache_size_gb": 3,  "default_model": "qwen3-14b-int4-ov", "agent_model": "qwen3-8b-int4-ov",  "routing_default": "local" },
+        "document": { "max_loaded_models": 1, "kv_cache_size_gb": 12, "default_model": "qwen3-14b-int4-ov", "agent_model": "qwen3-14b-int4-ov", "routing_default": "local" },
+        "ovh":      { "max_loaded_models": 1, "kv_cache_size_gb": 3,  "default_model": "qwen3-8b-int4-ov",  "agent_model": "qwen3-8b-int4-ov",  "routing_default": "ovh"   }
+    }
 }

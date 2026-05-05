@@ -252,7 +252,6 @@ _TOTAL_VRAM_GB: Optional[float] = None
 _vram_allocated: Dict[str, float] = {}   # model_id → estimated GB on GPU
 _vlm_lock = asyncio.Lock()
 
-_init_vram()   # populate _TOTAL_VRAM_GB at import time (quick property query, no model load)
 _vlm_infer_locks: Dict[str, asyncio.Lock] = {}
 
 
@@ -283,6 +282,10 @@ class ServerStats:
     total_tokens: int = 0
 
 stats = ServerStats()
+
+_active_profile: str = "speed"
+_profile_switching: bool = False
+_profile_lock = asyncio.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -595,6 +598,9 @@ def _init_vram() -> None:
         log.warning(f"VRAM total query failed: {exc} — soft VRAM cap disabled")
 
 
+_init_vram()   # populate _TOTAL_VRAM_GB at import time (quick property query, no model load)
+
+
 def vram_free_gb() -> Optional[float]:
     """Estimated free VRAM from internal allocation tracking (not a live GPU query).
     A fresh ov.Core() always reports zero usage for allocations made by other instances,
@@ -757,6 +763,59 @@ async def _warm_model(model_id: str) -> None:
         log.warning(f"Preload failed for {model_id}: {exc}")
 
 
+async def _apply_profile(name: str) -> None:
+    """Evict all LLMs, apply profile settings, then preload the agent model."""
+    global _active_profile, _profile_switching, DEFAULT_MODEL, AGENT_MODEL, MAX_LOADED_MODELS
+    profiles = _cfg.get("profiles", {})
+    prof = profiles.get(name)
+    if not prof:
+        log.warning(f"_apply_profile: '{name}' not in config.profiles — ignoring")
+        return
+    async with _profile_lock:
+        _profile_switching = True
+        log.info(f"Profile switch → '{name}' starting")
+        try:
+            # Drain in-flight requests (max 15 s)
+            deadline = time.monotonic() + 15.0
+            while stats.active_requests > 0 and time.monotonic() < deadline:
+                await asyncio.sleep(0.2)
+            if stats.active_requests > 0:
+                log.warning(f"Profile switch proceeding with {stats.active_requests} active request(s) still in flight")
+
+            # Evict all LLMs
+            async with _model_lock:
+                for mid in list(loaded_models):
+                    del loaded_models[mid]
+                    del loaded_tokenizers[mid]
+                    model_last_used.pop(mid, None)
+                    _vram_allocated.pop(mid, None)
+                gc.collect()
+
+            # Apply new settings to live config
+            _cfg["kv_cache_size_gb"]  = prof.get("kv_cache_size_gb",  _cfg["kv_cache_size_gb"])
+            _cfg["max_loaded_models"] = prof.get("max_loaded_models", _cfg["max_loaded_models"])
+            MAX_LOADED_MODELS = _cfg["max_loaded_models"]
+            _cfg.setdefault("routing", {})["default"] = prof.get("routing_default", "local")
+            new_default = prof.get("default_model", "")
+            new_agent   = prof.get("agent_model", "")
+            if new_default and new_default in AVAILABLE_MODELS:
+                DEFAULT_MODEL = new_default
+            if new_agent and new_agent in AVAILABLE_MODELS:
+                AGENT_MODEL = new_agent
+
+            _active_profile = name
+            log.info(
+                f"Profile '{name}' active — kv={_cfg['kv_cache_size_gb']}GB "
+                f"max_models={MAX_LOADED_MODELS} routing={_cfg['routing']['default']}"
+            )
+            if AGENT_MODEL:
+                asyncio.create_task(_warm_model(AGENT_MODEL))
+        except Exception as exc:
+            log.error(f"Profile switch to '{name}' failed: {exc}")
+        finally:
+            _profile_switching = False
+
+
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
@@ -784,6 +843,9 @@ class ChatRequest(BaseModel):
 class EmbeddingRequest(BaseModel):
     model: str = EMBEDDING_MODEL_ID
     input: List[str] | str
+
+class ProfileRequest(BaseModel):
+    profile: str
 
 
 # ---------------------------------------------------------------------------
@@ -817,12 +879,29 @@ async def health():
         "vram_total_gb":     round(_TOTAL_VRAM_GB, 2) if _TOTAL_VRAM_GB else None,
         "vram_allocated_gb": {k: round(v, 2) for k, v in _vram_allocated.items()},
         "vram_free_gb":      round(vram_free_gb(), 2) if vram_free_gb() is not None else None,
+        "kv_cache_size_gb":  _cfg.get("kv_cache_size_gb", 8),
+        "active_profile":    _active_profile,
+        "profile_switching": _profile_switching,
         "router": {
             "default":   _cfg.get("routing", {}).get("default", "local"),
             "backends":  list(_backends.keys()),
             "model_map": _cfg.get("routing", {}).get("model_map", {}),
         },
     }
+
+
+@app.post("/admin/profile")
+async def set_profile(req: ProfileRequest):
+    profiles = _cfg.get("profiles", {})
+    if req.profile not in profiles:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown profile '{req.profile}'. Available: {list(profiles)}",
+        )
+    if _profile_switching:
+        raise HTTPException(status_code=409, detail="Profile switch already in progress")
+    asyncio.create_task(_apply_profile(req.profile))
+    return JSONResponse(status_code=202, content={"accepted": True, "profile": req.profile})
 
 
 @app.get("/v1/models")

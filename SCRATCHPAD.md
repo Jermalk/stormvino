@@ -7,6 +7,12 @@
 
 Session 7 fixed three layers of VRAM management bugs and added model preloading. (1) `_evict_lru()` and VLM inline eviction now call `gc.collect()` so the C++ destructor runs before the next VRAM query. (2) Soft VRAM cap changed from `if` to `while` with re-query after each eviction. (3) `vram_free_gb()` was fundamentally broken — a fresh `ov.Core()` always shows zero usage; replaced with internal `_vram_allocated` tracking + `_TOTAL_VRAM_GB` queried once at startup. (4) `kv_cache_size_gb` reduced 8→3 in config.json (two loaded models were consuming 29.6 GB against 22.71 GB total). (5) Startup preload of qwen3-8b via `@app.on_event("startup")`; speculative preload of qwen3-14b fired when agent returns tool_calls. VRAM state now visible in `/health` response. Tests: 32/32.
 
+## Profile switching — DONE (not yet committed)
+
+- `config.json`: added `profiles` block with speed / document / ovh entries
+- `ov_server.py`: globals `_active_profile`, `_profile_switching`, `_profile_lock`; `_apply_profile()` drains requests, evicts all LLMs, updates `_cfg` + module globals live, preloads agent model; `POST /admin/profile` returns 202; `/health` gains `active_profile` + `profile_switching`
+- `ov_monitor.py`: `KeypressThread` (setcbreak, select, daemon), `post_profile()`, `make_profiles_panel()`, wired into `build_display()` and `main()` with `finally: key_thread.stop()`
+
 ## Hashtag routing — implementation plan (carried from Session 5, still pending)
 
 - Server patch: top of `_pick_backend()` in ov_server.py — read `/tmp/ov_routing_override.json`;
