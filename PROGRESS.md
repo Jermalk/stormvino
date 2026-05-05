@@ -115,11 +115,21 @@
 
 ---
 
+### 2026-05-06 — Session 12 (68714ba)
+**Working on:** CC latency reduction — tool schema stripping, prefix caching, unified model map
+**Last commit:** 68714ba — perf: prefix caching + unified CC model map cuts latency from 3m to ~40s warm
+**Next action:** None urgent — CC is functional. Possible future: investigate why prefix cache doesn't persist across long generations (context: turns after 881-token response still take ~47s full prefill).
+**Blocked on:** nothing
+**Open questions:** (1) Why does prefix cache appear to miss after a long generation (881 tok)? KV eviction policy? (2) Tool calls produce `<think></think>` empty blocks in stream — does CC handle these gracefully long-term?
+**Tests:** pass (32/32) — CC verified working: directory listing, file read, code explanation all functional
+
+---
+
 ## NOW
 
-**Working on:** Claude Code /v1/messages hang — fixed
-**Last commit:** f8efbf5 — fix: eliminate ov_server re-import that hung /v1/messages generation
-**Next action:** Test Claude Code end-to-end — open a new Claude Code session pointing at this server and send "hello"
+**Working on:** Claude Code integration — functional and in use
+**Last commit:** 68714ba — perf: prefix caching + unified CC model map cuts latency from 3m to ~40s warm
+**Next action:** No blocking issue. If latency becomes unacceptable, investigate KV prefix cache persistence across long turns (see open questions above).
 **Blocked on:** nothing
-**Open questions:** (1) Does the full CC flow (system prompt + tool definitions) work end-to-end? (2) Empty think blocks in stream — cosmetic or does CC choke on them?
+**Open questions:** (1) Prefix cache misses after long generations (>500 tok output) — likely KV block eviction under pressure. (2) Empty `<think></think>` blocks in stream output — cosmetic, not breaking CC.
 **Tests:** pass (32/32)

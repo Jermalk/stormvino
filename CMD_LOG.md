@@ -157,3 +157,17 @@ curl -s http://localhost:11435/v1/messages -H "Content-Type: application/json" \
 curl -s -N http://localhost:11435/v1/messages -H "Content-Type: application/json" \
   -d '{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"Reply with exactly one word: hi."}],"max_tokens":10,"stream":true}'
 ```
+
+## 2026-05-06 — Session 12: CC latency reduction
+
+```bash
+# Measure actual input token count from real CC request
+journalctl -u ov-server -n 20 --no-pager | grep "input tokens"
+# Result: 53881 tokens with full schemas, 26861 after schema stripping
+
+# Confirm prefix caching works (controlled test, same 3K-token prefix)
+time curl -s http://localhost:11435/v1/messages \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"qwen3-14b-int4-ov\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hi.\"}],\"system\":\"$SYSTEM\",\"max_tokens\":10,\"stream\":false}"
+# Cold: 39.5s, Warm (identical): 0.4s → 100x speedup confirmed
+```
