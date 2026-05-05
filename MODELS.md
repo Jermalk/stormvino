@@ -1,6 +1,12 @@
 # Model Management
 
 How to convert HuggingFace models to OpenVINO format and add them to ov_server.
+*UPDATED at 23.04 2026 by Jermalk*
+Actually my experiment with qwen3-14b-int4, qwen3-8b-int4 converted on my own to ov format was good lesson.
+You can do it - it's learning - it's not worth it. Models originally published by OpenVino are faster at loading to VRAM - tested.
+So when you're bored and have some time go that way and check.
+Huh, I don't have to mention I converted also on my own Qwen2.5-VL-7B-int4 - because I can :-)
+I didn't make any speed comparison with OpenVINO/Qwen2.5-VL-7B-Instruct-int4-ov though but it works well.
 
 ---
 

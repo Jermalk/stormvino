@@ -84,6 +84,6 @@ curl -s http://localhost:11435/v1/models | python3 -m json.tool
 ```bash
 curl -s http://localhost:11435/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model": "qwen3-14b-int4", "messages": [{"role": "user", "content": "Hello"}]}' \
+  -d '{"model": "qwen3-14b-int4-ov", "messages": [{"role": "user", "content": "Hello"}]}' \
   | python3 -m json.tool
 ```

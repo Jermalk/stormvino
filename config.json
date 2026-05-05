@@ -14,8 +14,9 @@
         "enabled": true,
         "thinking": false,
         "vram_reserve_pct": 20,
+        "max_new_tokens": 8192,
         "model_map": {
-            "claude-haiku-*":  { "backend": "local", "model": "qwen2.5-coder-14b-int4" },
+            "claude-haiku-*":  { "backend": "local", "model": "qwen3-14b-int4-ov" },
             "claude-sonnet-*": { "backend": "local", "model": "qwen3-14b-int4-ov" },
             "claude-opus-*":   { "backend": "ovh",   "model": "Qwen3-32B" }
         }

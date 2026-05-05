@@ -191,6 +191,8 @@ CONFIG             = {
 def get_scheduler_config() -> ov_genai.SchedulerConfig:
     sched = ov_genai.SchedulerConfig()
     sched.cache_size = _cfg.get("kv_cache_size_gb", 8)
+    sched.enable_prefix_caching = _cfg.get("enable_prefix_caching", True)
+    sched.max_num_batched_tokens = _cfg.get("max_num_batched_tokens", 4096)
     return sched
 
 
@@ -1394,7 +1396,7 @@ async def _anthropic_stream(
         stats.active_requests -= 1
         elapsed = time.time() - start
         tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
-        log.info(f"{model_id} [anthropic stream]: {completion_tokens} tok in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
+        log.info(f"{model_id} [anthropic stream]: {prompt_tokens}→{completion_tokens} tok in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
         _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
 
     yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
@@ -1487,6 +1489,7 @@ class LocalBackend(Backend):
         prompt    = build_prompt(messages, tokenizer, tools=req.tools, thinking=thinking)
         gen_config    = _build_gen_config(req)
         prompt_tokens = len(tokenizer.encode(prompt))
+        log.info(f"[anthropic stream] {model_id}: {prompt_tokens} input tokens, max_new={req.max_tokens}")
         return _anthropic_stream(pipe, model_id, prompt, gen_config, prompt_tokens)
 
 
@@ -1645,6 +1648,14 @@ def _pick_backend(model: str) -> Backend:
     return backend
 
 
+def _strip_tool_schemas(tools: Optional[List[Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+    """Drop inputSchema from each tool, keeping only name and description.
+    Reduces Claude Code's ~53K-token tool blob to ~3K tokens."""
+    if not tools:
+        return tools
+    return [{"name": t["name"], "description": t.get("description", "")} for t in tools]
+
+
 def _resolve_claude_code(model: str) -> Optional[Dict[str, Any]]:
     """If claude_code mode is enabled and model matches a claude-* pattern,
     return {model, backend, thinking}. Else None."""
@@ -1674,7 +1685,11 @@ async def anthropic_messages(req: AnthropicRequest):
     cc = _resolve_claude_code(req.model)
     if cc:
         log.info(f"[claude-code] {req.model!r} → {cc['model']!r} via {cc['backend']}")
-        req     = req.model_copy(update={"model": cc["model"], "thinking": cc["thinking"]})
+        stripped_tools = _strip_tool_schemas(req.tools)
+        cc_max_new = _cfg.get("claude_code", {}).get("max_new_tokens")
+        max_tokens = min(req.max_tokens, cc_max_new) if cc_max_new else req.max_tokens
+        req     = req.model_copy(update={"model": cc["model"], "thinking": cc["thinking"],
+                                         "tools": stripped_tools, "max_tokens": max_tokens})
         backend = _backends.get(cc["backend"]) or _backends["local"]
         if cc["backend"] == "local":
             await _maximize_context_for(cc["model"])
