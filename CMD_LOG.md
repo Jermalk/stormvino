@@ -139,3 +139,21 @@ systemctl restart ov-server
 # Watch startup preload in logs:
 journalctl -u ov-server -f
 ```
+
+## 2026-05-05 — Session 11: fix /v1/messages hang
+
+```bash
+# Confirm /v1/chat/completions works (baseline)
+curl -s -N http://localhost:11435/v1/chat/completions -H "Content-Type: application/json" \
+  -d '{"model":"qwen3-14b-int4-ov","messages":[{"role":"user","content":"Say hello."}],"stream":true,"max_tokens":20}'
+
+# Reproduce hang — non-streaming /v1/messages
+timeout 90 curl -s http://localhost:11435/v1/messages -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"Say hello."}],"max_tokens":20,"stream":false}'
+
+# After fix — verify both paths
+curl -s http://localhost:11435/v1/messages -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"Reply with exactly one word: hi."}],"max_tokens":10,"stream":false}'
+curl -s -N http://localhost:11435/v1/messages -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"Reply with exactly one word: hi."}],"max_tokens":10,"stream":true}'
+```

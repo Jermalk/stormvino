@@ -105,11 +105,21 @@
 
 ---
 
+### 2026-05-05 — Session 11 (f8efbf5)
+**Working on:** Debug Claude Code streaming — "hello" hangs (model loads OK, GPU at 100W, no tokens delivered)
+**Last commit:** f8efbf5 — fix: eliminate ov_server re-import that hung /v1/messages generation
+**Next action:** Test Claude Code end-to-end with a real "hello" from the CLI
+**Blocked on:** nothing
+**Open questions:** (1) Does the fix hold for a real Claude Code session with full system prompt + tools? (2) Is the empty `<think></think>` block in streaming responses OK for Claude Code?
+**Tests:** pass (32/32)
+
+---
+
 ## NOW
 
-**Working on:** Debug Claude Code streaming — "hello" hangs (model loads OK, GPU at 100W, no tokens delivered)
-**Last commit:** TBD (session wrap commit)
-**Next action:** Investigate _anthropic_stream / AsyncTokenStreamer — add per-token log, test with curl, compare with /v1/chat path
+**Working on:** Claude Code /v1/messages hang — fixed
+**Last commit:** f8efbf5 — fix: eliminate ov_server re-import that hung /v1/messages generation
+**Next action:** Test Claude Code end-to-end — open a new Claude Code session pointing at this server and send "hello"
 **Blocked on:** nothing
-**Open questions:** (1) Why does streaming via /v1/messages silently hang when qwen3-14b is loaded with claude_code mode? (2) Does the same prompt via /v1/chat/completions work? (3) Is there a lock or queue issue in AsyncTokenStreamer under CB mode?
+**Open questions:** (1) Does the full CC flow (system prompt + tool definitions) work end-to-end? (2) Empty think blocks in stream — cosmetic or does CC choke on them?
 **Tests:** pass (32/32)
