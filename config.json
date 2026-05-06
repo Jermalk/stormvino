@@ -1,40 +1,18 @@
 {
     "models_dir":             "/opt/ov_server/models",
-    "device":                 "GPU.1",
+    "device":                 "AUTO",
     "ov_cache_dir":           "/tmp/ov_cache_b60",
-    "default_model":          "qwen3-14b-int4-ov",
-    "agent_model":            "qwen3-8b-int4-ov",
+    "default_model":          "qwen3-30b-a3b-int4-ov",
+    "agent_model":            "qwen3-30b-a3b-int4-ov",
     "embedding_model":        "multilingual-e5-large-int8",
     "vision_model":           "qwen2.5-vl-7b-int4-ov",
     "model_aliases":          {
         "qwen2.5-coder:14b":  "qwen2.5-coder-14b-int4",
-        "qwen3-14b-int4":     "qwen3-14b-int4-ov"
+        "qwen3-14b-int4":     "qwen3-14b-int4-ov",
+        "qwen3-30b":          "qwen3-30b-a3b-int4-ov"
     },
-    "claude_code": {
-        "enabled": true,
-        "thinking": false,
-        "vram_reserve_pct": 20,
-        "max_new_tokens": 8192,
-        "model_map": {
-            "claude-haiku-*":  { "backend": "local", "model": "qwen3-14b-int4-ov" },
-            "claude-sonnet-*": { "backend": "local", "model": "qwen3-14b-int4-ov" },
-            "claude-opus-*":   { "backend": "ovh",   "model": "Qwen3-32B" }
-        }
-    },
-    "routing": {
-        "default":   "local",
-        "model_map": {},
-        "backends": {
-            "ovh": {
-                "type":        "openai_compat",
-                "base_url":    "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-                "api_key_env": "OVH_API_KEY",
-                "model":       "Qwen3-32B"
-            }
-        }
-    },
-    "kv_cache_size_gb":       3,
-    "max_loaded_models":      2,
+    "kv_cache_size_gb":       6,
+    "max_loaded_models":      1,
     "vram_headroom_gb":       1.5,
     "max_ram_percent":        75.0,
     "max_new_tokens_default": 2048,
@@ -42,8 +20,7 @@
     "vlm_max_image_turns":    1,
     "vlm_max_image_side_px":  1280,
     "profiles": {
-        "speed":    { "max_loaded_models": 2, "kv_cache_size_gb": 3,  "default_model": "qwen3-14b-int4-ov", "agent_model": "qwen3-8b-int4-ov",  "routing_default": "local" },
-        "document": { "max_loaded_models": 1, "kv_cache_size_gb": 12, "default_model": "qwen3-14b-int4-ov", "agent_model": "qwen3-14b-int4-ov", "routing_default": "local" },
-        "ovh":      { "max_loaded_models": 1, "kv_cache_size_gb": 3,  "default_model": "qwen3-8b-int4-ov",  "agent_model": "qwen3-8b-int4-ov",  "routing_default": "ovh"   }
+        "speed":    { "max_loaded_models": 2, "kv_cache_size_gb": 3, "default_model": "qwen3-14b-int4-ov", "agent_model": "qwen3-8b-int4-ov" },
+        "document": { "max_loaded_models": 1, "kv_cache_size_gb": 6, "default_model": "qwen3-30b-a3b-int4-ov", "agent_model": "qwen3-30b-a3b-int4-ov" }
     }
 }

@@ -6,6 +6,11 @@
 > All curl commands are single-line bash.
 
 ---
+### 2026-05-06 — model download
+
+```  source /home/jerzy/ov_env/bin/activate 
+     && python3 -c "from huggingface_hub import snapshot_download; snapshot_download('OpenVINO/Qwen3-30B-A3B-Instruct-2507-int4-ov', local_dir='/opt/ov_server/models/qwen3-30b-a3b-int4-ov')"  
+```
 
 ### 2026-05-04 — Health check (baseline)
 
