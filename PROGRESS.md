@@ -155,11 +155,21 @@
 
 ---
 
+### 2026-05-07 — Session 16 (560b4b5)
+**Working on:** Routing restoration, OVH model query, intelligent routing architecture design
+**Last commit:** 560b4b5 — fix: ovh profile no longer evicts local models on switch
+**Next action:** Phase 1 Step 1.1 — new config.json schema + _load_config() update (PLAN_routing.md)
+**Blocked on:** nothing
+**Open questions:** (1) george_mcp.py deferred — superseded by routing work. (2) New test suite needed. (3) STT Phase 1 still queued.
+**Tests:** 0/0 — no test files remain
+
+---
+
 ## NOW
 
-**Working on:** Post-refactor state check — Anthropic layer removal confirmed complete
-**Last commit:** 059dd90 — refactor: remove Anthropic /v1/messages layer and routing backends
-**Next action:** User to decide — george_mcp.py still on backlog; or write new test suite for /v1/chat/completions
+**Working on:** Intelligent routing architecture — ADR written, plan ready, no code yet
+**Last commit:** (session-wrap commit — see below after commit)
+**Next action:** PLAN_routing.md Phase 1 Step 1.1 — new config.json schema + `_load_config()` defaults
 **Blocked on:** nothing
-**Open questions:** (1) george_mcp.py — still planned? (2) New test suite needed (all tests deleted with Anthropic layer). (3) STT Phase 1 still queued.
+**Open questions:** (1) Embedding threshold 0.72 — will need tuning on real queries after Phase 2 is live. (2) OVH catalogue TTL 300s — adjust if OVH model list changes frequently. (3) STT Phase 1 still queued (lower priority than routing).
 **Tests:** 0/0 — no test files remain

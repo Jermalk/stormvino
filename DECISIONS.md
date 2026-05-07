@@ -166,3 +166,33 @@
 **Rationale:** `CURRENT_PLAN.md` contained only completed Phase 0–N steps from sessions 1–4 — no live action items. `FUTURE_PLAN.md` captures the new project direction (local voice loop: Whisper STT → qwen3-14b LLM → Piper/Kokoro TTS → sounddevice client + RSS news injector) in a format ready to drive implementation sessions.
 **Rejected alternative:** Extending CURRENT_PLAN.md in place — misleading name; mixing completed history with future work obscures status.
 **Affects:** FUTURE_PLAN.md (new), ARCHIVE_PLAN_2026-05-04.md (renamed from CURRENT_PLAN.md)
+
+### 2026-05-07 — Intelligent routing architecture adopted (ADR_20260507_routing.md)
+**Decision:** Replace monolithic profile system with three independent axes: provider_scope (what models exist), profile (how the task runs), and routing pipeline (which model executes it). Routing uses rule signals → embedding similarity → assessor LLM in cascade.
+**Rationale:** Old profiles conflated provider, hardware settings, and model selection — switching to ovh evicted local models unnecessarily. Automatic routing removes manual model selection as a daily concern; the cascade approach handles 75%+ of queries with <15 ms overhead via rules+embedding, reserving the slower assessor for genuinely ambiguous queries.
+**Rejected alternative:** Keep profiles, add per-profile model override — explodes profile count; still requires user to know which model fits which task.
+**Affects:** config.json (full schema replacement in Phase 1), ov_server.py (routing pipeline), ADR_20260507_routing.md, PLAN_routing.md
+
+### 2026-05-07 — Provider labels loc/ovh/ext on model entries
+**Decision:** Each model entry in task_class.models uses `provider: "loc" | "ovh" | "ext"` and `tier: "fast" | "best"` rather than implicit ordering by list position.
+**Rationale:** Self-documenting config; provider label drives scope filtering; tier label drives preference selection. Position-implicit ordering breaks when models are reordered or added mid-list.
+**Rejected alternative:** Implicit position (first=fast, last=best) — works but breaks on any config edit; no way to express "fast OVH model" without restructuring.
+**Affects:** config.json task_classes, _select_model() in ov_server.py
+
+### 2026-05-07 — Assessor = qwen3-8b, permanently loaded, own KV pipeline
+**Decision:** qwen3-8b-int4-ov is the permanent assessor model in a dedicated LLMPipeline with 2 GB KV, outside the task model pool. When task routing resolves to qwen3-8b, the assessor pipeline is reused for task execution.
+**Rationale:** qwen3-8b on B60 runs at 105 t/s — fast enough for routing decisions (~1 s) and lightweight tasks. Permanent load eliminates cold-start. Pipeline reuse when task = assessor model avoids double VRAM allocation (~5 GB weights).
+**Rejected alternative:** Qwen2.5-1.5B as router — not on disk; less reliable for compound intents; no tool use capability.
+**Affects:** ov_server.py (_load_assessor, _run_assessor_routing), config.json assessor block
+
+### 2026-05-07 — Embedding model (e5-large) as stage-2 router
+**Decision:** Embed each incoming query with the already-loaded multilingual-e5-large model; cosine similarity against pre-computed task-class centroids determines routing when no rule signal fires. Threshold default 0.72, configurable.
+**Rationale:** e5-large is already in VRAM (zero marginal cost); inference is ~10 ms; handles the unambiguous 70-80% of queries that rules miss, reserving the slower assessor for genuinely ambiguous cases.
+**Rejected alternative:** Skip embedding stage, always use assessor for non-rule cases — assessor adds 1-2 s per request; unacceptable for simple queries in precise profile.
+**Affects:** ov_server.py (_route_by_embedding, _task_class_embeddings startup init), config.json router.embedding_threshold
+
+### 2026-05-07 — Routing decision serialised as task graph JSON from Phase 1
+**Decision:** All routing stages (rules, embedding, assessor) produce the same task graph JSON `{task_class, steps:[{model, provider, purpose}], confidence, strategy}`, even in Phase 1 when steps always has one entry.
+**Rationale:** Fixes the pipeline executor interface at Phase 1 so Phases 4-5 (multi-step) are additive changes with no interface rewrites.
+**Rejected alternative:** Simple `{model_id}` return in Phase 1, upgrade later — would require changing the executor interface mid-project.
+**Affects:** ov_server.py routing pipeline + task graph executor, PLAN_routing.md
