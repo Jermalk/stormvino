@@ -19,8 +19,21 @@
     "max_new_tokens_agent":   500,
     "vlm_max_image_turns":    1,
     "vlm_max_image_side_px":  1280,
+    "routing": {
+        "default":   "local",
+        "model_map": {},
+        "backends": {
+            "ovh": {
+                "type":        "openai_compat",
+                "base_url":    "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+                "api_key_env": "OVH_API_KEY",
+                "model":       "Qwen3-32B"
+            }
+        }
+    },
     "profiles": {
-        "speed":    { "max_loaded_models": 2, "kv_cache_size_gb": 3, "default_model": "qwen3-14b-int4-ov", "agent_model": "qwen3-8b-int4-ov" },
-        "document": { "max_loaded_models": 1, "kv_cache_size_gb": 6, "default_model": "qwen3-30b-a3b-int4-ov", "agent_model": "qwen3-30b-a3b-int4-ov" }
+        "speed":    { "max_loaded_models": 2, "kv_cache_size_gb": 3, "default_model": "qwen3-14b-int4-ov",     "agent_model": "qwen3-8b-int4-ov",      "routing_default": "local" },
+        "document": { "max_loaded_models": 1, "kv_cache_size_gb": 6, "default_model": "qwen3-30b-a3b-int4-ov", "agent_model": "qwen3-30b-a3b-int4-ov", "routing_default": "local" },
+        "ovh":      { "max_loaded_models": 1, "kv_cache_size_gb": 3, "default_model": "qwen3-8b-int4-ov",      "agent_model": "qwen3-8b-int4-ov",      "routing_default": "ovh"   }
     }
 }

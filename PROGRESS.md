@@ -145,11 +145,21 @@
 
 ---
 
+### 2026-05-06 — Session 15 (059dd90) — no wrap done
+**Working on:** Remove Anthropic /v1/messages layer and all routing backends
+**Last commit:** 059dd90 — refactor: remove Anthropic /v1/messages layer and routing backends
+**Next action:** (not recorded — session ended without wrap)
+**Blocked on:** nothing
+**Open questions:** none recorded
+**Tests:** 0/0 (all Anthropic test files deleted with the layer)
+
+---
+
 ## NOW
 
-**Working on:** Architect+George two-agent workflow design; MCP server for george/ov_server deferred
-**Last commit:** dc732a0 — docs: session wrap — voice agent plan, CURRENT_PLAN archived
-**Next action:** Build `george_mcp.py` MCP server exposing george_edit, george_query, server_health, server_profile — register in ~/.claude/settings.json; then start GrainMesh Session 1 using ARCHITECT_MODE.md protocol
+**Working on:** Post-refactor state check — Anthropic layer removal confirmed complete
+**Last commit:** 059dd90 — refactor: remove Anthropic /v1/messages layer and routing backends
+**Next action:** User to decide — george_mcp.py still on backlog; or write new test suite for /v1/chat/completions
 **Blocked on:** nothing
-**Open questions:** (1) MCP server transport: stdio vs SSE? (2) george_edit timeout — aider on 14b can take 30–60s per task. (3) STT Phase 1 still queued.
-**Tests:** pass (32/32)
+**Open questions:** (1) george_mcp.py — still planned? (2) New test suite needed (all tests deleted with Anthropic layer). (3) STT Phase 1 still queued.
+**Tests:** 0/0 — no test files remain

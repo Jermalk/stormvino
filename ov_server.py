@@ -13,6 +13,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi import Request
 from datetime import datetime, timezone
 import json
+import httpx
 import numpy as np
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
@@ -805,10 +806,13 @@ async def _apply_profile(name: str) -> None:
                     while len(loaded_models) > MAX_LOADED_MODELS:
                         _evict_lru()
 
+            routing_default = prof.get("routing_default", "local")
+            _cfg.setdefault("routing", {})["default"] = routing_default
+
             _active_profile = name
             log.info(
                 f"Profile '{name}' active — kv={_cfg['kv_cache_size_gb']}GB "
-                f"max_models={MAX_LOADED_MODELS} routing={_cfg['routing']['default']}"
+                f"max_models={MAX_LOADED_MODELS} routing={routing_default}"
                 + ("" if kv_changed else " (LLMs retained)")
             )
             if AGENT_MODEL:
@@ -886,6 +890,7 @@ async def health():
         "kv_cache_size_gb":  _cfg.get("kv_cache_size_gb", 8),
         "active_profile":    _active_profile,
         "profile_switching": _profile_switching,
+        "routing_backend":   _cfg.get("routing", {}).get("default", "local"),
     }
 
 
@@ -1032,10 +1037,74 @@ async def _chat_vlm(req: ChatRequest):
     }
 
 
+# ---------------------------------------------------------------------------
+# Routing — backend selection and proxy for /v1/chat/completions
+# ---------------------------------------------------------------------------
+def _pick_backend_name(model: str) -> str:
+    routing = _cfg.get("routing", {})
+    return routing.get("model_map", {}).get(model, routing.get("default", "local"))
+
+
+async def _proxy_chat(req: ChatRequest, spec: dict) -> Union[StreamingResponse, JSONResponse]:
+    """Forward a ChatRequest to an OpenAI-compat backend defined in routing.backends."""
+    base_url = spec["base_url"].rstrip("/")
+    api_key  = os.environ.get(spec.get("api_key_env", ""), "")
+    headers  = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    body     = req.model_dump(exclude_none=True)
+    if "model" in spec:
+        body["model"] = spec["model"]
+
+    log.info(f"[proxy] → {base_url} model={body['model']} stream={req.stream}")
+
+    if req.stream:
+        async def stream_gen() -> AsyncGenerator[str, None]:
+            stats.active_requests += 1
+            stats.total_requests  += 1
+            try:
+                async with httpx.AsyncClient(timeout=300.0) as client:
+                    async with client.stream(
+                        "POST", f"{base_url}/chat/completions",
+                        json=body, headers=headers,
+                    ) as resp:
+                        resp.raise_for_status()
+                        async for line in resp.aiter_lines():
+                            if line:
+                                yield f"{line}\n\n"
+            except httpx.HTTPStatusError as exc:
+                log.error(f"[proxy] upstream error {exc.response.status_code}: {exc.response.text[:200]}")
+                raise HTTPException(status_code=502, detail="Upstream backend error")
+            finally:
+                stats.active_requests -= 1
+
+        return StreamingResponse(stream_gen(), media_type="text/event-stream")
+
+    stats.active_requests += 1
+    stats.total_requests  += 1
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            resp = await client.post(
+                f"{base_url}/chat/completions", json=body, headers=headers
+            )
+            resp.raise_for_status()
+            return JSONResponse(content=resp.json())
+    except httpx.HTTPStatusError as exc:
+        log.error(f"[proxy] upstream error {exc.response.status_code}: {exc.response.text[:200]}")
+        raise HTTPException(status_code=502, detail="Upstream backend error")
+    finally:
+        stats.active_requests -= 1
+
+
 @app.post("/v1/chat/completions")
 async def chat(req: ChatRequest):
     if _has_images(req.messages):
         return await _chat_vlm(req)
+
+    backend_name = _pick_backend_name(req.model)
+    if backend_name != "local":
+        spec = _cfg.get("routing", {}).get("backends", {}).get(backend_name)
+        if spec:
+            return await _proxy_chat(req, spec)
+        log.warning(f"Backend '{backend_name}' not in config — falling back to local")
 
     # Detect tool-selection calls — either via OpenAI tools param or
     # AnythingLLM's system-prompt style ("picks the most optimal function").
