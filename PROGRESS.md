@@ -168,7 +168,7 @@
 ## NOW
 
 **Working on:** Intelligent routing architecture — ADR written, plan ready, no code yet
-**Last commit:** 1ff05b4 — docs: gap-fill pass on routing ADR and plan
+**Last commit:** 73c38d6 — docs: integrate ovs_upgrade.md findings into routing ADR and plan
 **Next action:** PLAN_routing.md Phase 1 Step 1.1 — new config.json schema + `_load_config()` defaults
 **Blocked on:** nothing
 **Open questions:** (1) Embedding threshold 0.72 — will need tuning on real queries after Phase 2 is live. (2) OVH catalogue TTL 300s — adjust if OVH model list changes frequently. (3) STT Phase 1 still queued (lower priority than routing).
