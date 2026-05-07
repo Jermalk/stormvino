@@ -75,22 +75,74 @@ app = FastAPI()
 _CONFIG_FILE = Path(__file__).parent / "config.json"
 
 def _load_config() -> dict:
-    defaults = {
-        "models_dir":            str(Path(__file__).parent / "models"),
-        "device":                "GPU.1",
-        "ov_cache_dir":          "/tmp/ov_cache_b60",
-        "default_model":         "",          # resolved after discovery if empty
-        "agent_model":           "",          # resolved after discovery if empty
-        "embedding_model":       "",          # resolved after discovery if empty
-        "model_aliases":         {},
-        "max_loaded_models":     2,
-        "vram_headroom_gb":      1.5,
-        "max_ram_percent":       75.0,
+    defaults: dict = {
+        # ── hardware ────────────────────────────────────────────────────────
+        "models_dir":             str(Path(__file__).parent / "models"),
+        "device":                 "AUTO",
+        "ov_cache_dir":           "/tmp/ov_cache_b60",
+        "embedding_model":        "",
+        "vision_model":           "",
+        "model_aliases":          {},
+        "max_loaded_models":      2,
+        "kv_cache_size_gb":       8,
+        "vram_headroom_gb":       1.5,
+        "max_ram_percent":        75.0,
         "max_new_tokens_default": 2048,
-        "max_new_tokens_agent":  200,
-        "vlm_max_image_turns":   1,     # keep images only from the last N user turns
-        "vlm_max_image_side_px": 1280,  # resize images so longest side ≤ this value
-        "kv_cache_size_gb":      8,     # dedicated paged KV cache budget for LLMPipeline
+        "vlm_max_image_turns":    1,
+        "vlm_max_image_side_px":  1280,
+        "enable_prefix_caching":  True,
+        "max_num_batched_tokens":  4096,
+        # ── routing control ─────────────────────────────────────────────────
+        "provider_scope":  "local",
+        "active_profile":  "fast",
+        "providers":       {},
+        # ── assessor ────────────────────────────────────────────────────────
+        "assessor": {
+            "model":            "",
+            "kv_cache_size_gb": 2,
+        },
+        # ── routing pipeline ────────────────────────────────────────────────
+        "router": {
+            "embedding_threshold": 0.72,
+            "long_context_tokens": 4000,
+            "keywords":            {"web_search": []},
+        },
+        # ── behavioral profiles ─────────────────────────────────────────────
+        "profiles": {
+            "fast": {
+                "thinking":         False,
+                "max_new_tokens":   512,
+                "model_preference": "fastest",
+                "use_assessor":     False,
+            },
+            "precise": {
+                "thinking":         True,
+                "max_new_tokens":   4096,
+                "model_preference": "balanced",
+                "use_assessor":     True,
+            },
+            "laborious": {
+                "thinking":         True,
+                "max_new_tokens":   16384,
+                "model_preference": "best",
+                "use_assessor":     True,
+            },
+        },
+        # ── task classes ────────────────────────────────────────────────────
+        "task_classes": {
+            "vision":     {"description": "Image understanding", "models": []},
+            "web_search": {"description": "Web search or live information", "models": []},
+            "document":   {"description": "Long document analysis", "models": []},
+            "code":       {"description": "Code writing and debugging", "models": []},
+            "general":    {"description": "General conversation", "models": []},
+        },
+        # ── legacy compat (removed from config.json; kept in defaults so
+        #    existing _pick() / MAX_NEW_TOKENS_AGENT references still work
+        #    until Step 2.4 migrates them to routing) ──────────────────────
+        "default_model":      "",
+        "agent_model":        "",
+        "max_new_tokens_agent": 200,
+        "routing":            {"default": "local", "model_map": {}, "backends": {}},
     }
     if _CONFIG_FILE.exists():
         try:
@@ -104,7 +156,30 @@ def _load_config() -> dict:
         log.warning(f"No config.json found at {_CONFIG_FILE} — using defaults")
     return defaults
 
+
+_KNOWN_CONFIG_KEYS: frozenset[str] = frozenset({
+    # hardware
+    "models_dir", "device", "ov_cache_dir", "embedding_model", "vision_model",
+    "model_aliases", "max_loaded_models", "kv_cache_size_gb", "vram_headroom_gb",
+    "max_ram_percent", "max_new_tokens_default", "vlm_max_image_turns",
+    "vlm_max_image_side_px", "enable_prefix_caching", "max_num_batched_tokens",
+    # routing
+    "provider_scope", "active_profile", "providers", "assessor", "router",
+    "profiles", "task_classes",
+    # legacy compat — tolerated without warning until Step 2.4
+    "default_model", "agent_model", "max_new_tokens_agent", "routing",
+})
+
+
+def _validate_config(cfg: dict) -> None:
+    """Log a warning for every unrecognised top-level config key. Never raises."""
+    for key in cfg:
+        if key not in _KNOWN_CONFIG_KEYS:
+            log.warning(f"[config] Unrecognised key '{key}' — ignored")
+
+
 _cfg = _load_config()
+_validate_config(_cfg)
 
 # ---------------------------------------------------------------------------
 # Model discovery — scans models_dir for valid OpenVINO LLM directories.
@@ -242,7 +317,7 @@ class ServerStats:
 
 stats = ServerStats()
 
-_active_profile: str = "speed"
+_active_profile: str = _cfg.get("active_profile", "fast")
 _profile_switching: bool = False
 _profile_lock = asyncio.Lock()
 

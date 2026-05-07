@@ -2,23 +2,120 @@
     "models_dir":             "/opt/ov_server/models",
     "device":                 "AUTO",
     "ov_cache_dir":           "/tmp/ov_cache_b60",
-    "default_model":          "qwen3-30b-a3b-int4-ov",
-    "agent_model":            "qwen3-30b-a3b-int4-ov",
     "embedding_model":        "multilingual-e5-large-int8",
     "vision_model":           "qwen2.5-vl-7b-int4-ov",
-    "model_aliases":          {
+    "model_aliases": {
         "qwen2.5-coder:14b":  "qwen2.5-coder-14b-int4",
         "qwen3-14b-int4":     "qwen3-14b-int4-ov",
         "qwen3-30b":          "qwen3-30b-a3b-int4-ov"
     },
-    "kv_cache_size_gb":       6,
+
     "max_loaded_models":      1,
+    "kv_cache_size_gb":       6,
     "vram_headroom_gb":       1.5,
     "max_ram_percent":        75.0,
     "max_new_tokens_default": 2048,
-    "max_new_tokens_agent":   500,
     "vlm_max_image_turns":    1,
     "vlm_max_image_side_px":  1280,
+    "enable_prefix_caching":  true,
+    "max_num_batched_tokens":  4096,
+
+    "provider_scope": "local",
+    "active_profile": "fast",
+
+    "providers": {
+        "ovh": {
+            "type":            "openai_compat",
+            "base_url":        "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
+            "api_key_env":     "OVH_API_KEY",
+            "catalogue_ttl_sec": 300
+        }
+    },
+
+    "assessor": {
+        "model":          "qwen3-8b-int4-ov",
+        "kv_cache_size_gb": 2
+    },
+
+    "router": {
+        "embedding_threshold":   0.72,
+        "long_context_tokens":   4000,
+        "keywords": {
+            "web_search": [
+                "search for", "find on the web", "look up", "google",
+                "browse", "what's the latest", "latest news", "current events"
+            ]
+        }
+    },
+
+    "profiles": {
+        "fast": {
+            "thinking":         false,
+            "max_new_tokens":   512,
+            "model_preference": "fastest",
+            "use_assessor":     false
+        },
+        "precise": {
+            "thinking":         true,
+            "max_new_tokens":   4096,
+            "model_preference": "balanced",
+            "use_assessor":     true
+        },
+        "laborious": {
+            "thinking":         true,
+            "max_new_tokens":   16384,
+            "model_preference": "best",
+            "use_assessor":     true
+        }
+    },
+
+    "task_classes": {
+        "vision": {
+            "description": "Image understanding, visual question answering, or document OCR",
+            "signal":      "has_image",
+            "models": [
+                { "id": "qwen2.5-vl-7b-int4-ov", "provider": "loc", "tier": "fast" }
+            ]
+        },
+        "web_search": {
+            "description": "Search the web, find current events, retrieve live information",
+            "signal":      "has_tools",
+            "models": [
+                { "id": "qwen3-8b-int4-ov",       "provider": "loc", "tier": "fast" },
+                { "id": "qwen3-14b-int4-ov",      "provider": "loc", "tier": "best" },
+                { "id": "Qwen3-32B",               "provider": "ovh", "tier": "best" }
+            ]
+        },
+        "document": {
+            "description": "Summarise or analyse a long document or pasted text",
+            "signal":      "long_context",
+            "context_threshold_tokens": 4000,
+            "models": [
+                { "id": "qwen3-14b-int4-ov",      "provider": "loc", "tier": "fast" },
+                { "id": "qwen3-30b-a3b-int4-ov",  "provider": "loc", "tier": "best" },
+                { "id": "Qwen3-32B",               "provider": "ovh", "tier": "fast" },
+                { "id": "gpt-oss-120b",            "provider": "ovh", "tier": "best" }
+            ]
+        },
+        "code": {
+            "description": "Write, debug, explain, or refactor code",
+            "models": [
+                { "id": "qwen3-8b-int4-ov",         "provider": "loc", "tier": "fast" },
+                { "id": "qwen2.5-coder-14b-int4",   "provider": "loc", "tier": "best" },
+                { "id": "Qwen3-Coder-480B-A35B",    "provider": "ovh", "tier": "best" }
+            ]
+        },
+        "general": {
+            "description": "General conversation, questions, and open-ended reasoning",
+            "models": [
+                { "id": "qwen3-8b-int4-ov",         "provider": "loc", "tier": "fast" },
+                { "id": "qwen3-14b-int4-ov",        "provider": "loc", "tier": "best" },
+                { "id": "qwen3-30b-a3b-int4-ov",    "provider": "loc", "tier": "best" },
+                { "id": "Qwen3-32B",                 "provider": "ovh", "tier": "best" }
+            ]
+        }
+    },
+
     "routing": {
         "default":   "local",
         "model_map": {},
@@ -30,10 +127,5 @@
                 "model":       "Qwen3-32B"
             }
         }
-    },
-    "profiles": {
-        "speed":    { "max_loaded_models": 2, "kv_cache_size_gb": 3, "default_model": "qwen3-14b-int4-ov",     "agent_model": "qwen3-8b-int4-ov",      "routing_default": "local" },
-        "document": { "max_loaded_models": 1, "kv_cache_size_gb": 6, "default_model": "qwen3-30b-a3b-int4-ov", "agent_model": "qwen3-30b-a3b-int4-ov", "routing_default": "local" },
-        "ovh":      { "routing_default": "ovh" }
     }
 }
