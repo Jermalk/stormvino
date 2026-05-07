@@ -151,10 +151,13 @@ def _detect_signal(req: ChatRequest) -> str | None:
 ```
 
 Signals (checked in order):
-1. `has_image` → `"vision"` (reuse existing `_has_images()`)
-2. `has_tools` → `None` (tools in req.tools → bypass task-class routing, dispatch to assessor)
+1. `has_image`    → `"vision"` (reuse existing `_has_images()`)
+2. `has_tools`    → `"web_search"` (req.tools present → client is providing search/action tools;
+                    select a fast tool-capable model via `_select_model`; do NOT route to assessor.
+                    In `fast` profile: picks `tier=fast, provider=loc` model from `web_search` class.
+                    In `precise`/`laborious`: assessor may still fire after embedding stage if score < threshold.)
 3. `long_context` → `"document"` (prompt token count > threshold from config)
-4. `keyword` → `"web_search"` (any keyword from task_class config matches last user message)
+4. `keyword`      → `"web_search"` (any keyword from task_class.keywords matches last user message)
 
 Signal check is O(1) or O(n_keywords) — always <1 ms.
 
@@ -166,13 +169,20 @@ Signal check is O(1) or O(n_keywords) — always <1 ms.
 
 **Files:** `ov_server.py` (new `_route_by_embedding(query: str) -> tuple[str, float]`)
 
-At startup: compute centroid embedding for each task class description using the
-already-loaded e5-large model. Store as `_task_class_embeddings: dict[str, np.ndarray]`.
+**Startup sequence (blocking — must complete before server accepts requests):**
+1. Load e5-large embedding model (same as `get_embedding_model()` but called eagerly)
+2. Compute centroid embedding for each task class description + example phrases
+3. Store as `_task_class_embeddings: dict[str, np.ndarray]`
+
+This is a blocking startup step, not a background task. If e5-large fails to load,
+disable Stage 2 routing and log a warning (system falls back to rules + assessor only).
 
 On each ambiguous request:
-1. Embed the last user message (mean-pool, L2-normalise — same as embeddings endpoint)
-2. Cosine similarity against all task class centroids
-3. Return `(task_class_name, similarity_score)`
+1. Concatenate last 3 turns (user + assistant messages) — single string, truncated to 512 tokens.
+   Using only the last user message misroutes context-dependent queries like "Now search for that."
+2. Embed (mean-pool, L2-normalise — same pipeline as embeddings endpoint)
+3. Cosine similarity against all task class centroids
+4. Return `(task_class_name, similarity_score)`
 
 If `similarity_score >= router.embedding_threshold` → use this task class.
 Else → fall through to assessor (Phase 3) or `"general"` (Phase 2 fallback).
@@ -200,8 +210,10 @@ Algorithm:
    - `fastest` → first entry with `tier: fast` and `provider: loc`
    - `balanced` → last entry with `provider: loc`
    - `best` → last entry overall (may be `ovh` if scope allows)
-4. Escalate if no match: `fastest → balanced → best → any available`
-5. If list is empty after filtering → return assessor model as fallback + log warning
+4. Validate against `AVAILABLE_MODELS`: if selected model is not on disk, move to next
+   candidate in list (escalate tier, then provider). Log warning per skip.
+5. Escalate preference if no match in tier: `fastest → balanced → best → any available`
+6. If list is empty after all filtering → return assessor model as emergency fallback + log error
 
 **Test:** Unit tests covering all preference × scope combinations for each task class.
 
@@ -298,6 +310,24 @@ asyncio.create_task(_load_assessor())
 **VRAM accounting:** `_vram_allocated` must include assessor's allocation so
 `vram_free_gb()` and the VRAM bar in ov-monitor remain accurate.
 
+**Eviction exclusion:** Assessor is NOT in `loaded_models` and must be explicitly
+excluded from VLM eviction logic. Add a guard in the VLM load path:
+```python
+# evict LRU task models only — never the assessor
+while vram_free_gb() < required and loaded_models:
+    _evict_lru()   # _evict_lru already skips non-loaded_models entries
+```
+Verify: `_evict_lru()` only iterates `loaded_models` — assessor is safe by design.
+
+**Startup order:** `_load_assessor()` fires as a background task. Centroid computation
+(Step 2.2) must complete first. Startup sequence:
+```
+1. [blocking] load e5-large + compute centroids
+2. [background task] load assessor
+3. [background task] warm agent/default model
+4. server begins accepting requests
+```
+
 **Test:** Server starts, logs show `[assessor] loaded qwen3-8b in X.Xs`. `/health` shows
 assessor model under new `assessor_loaded: true` field.
 
@@ -315,15 +345,24 @@ You are a routing agent. Given a user query, select the best task class and mode
 Output only valid JSON. Do not explain.
 
 Task classes:
-{json: task_class descriptions + available models for current scope/preference}
+{json: task_class name + description + model IDs with provider/tier — FROM CONFIG ONLY}
 
 Active profile: {name} — {description}
 <|im_end|>
 <|im_start|>user
-{last user message, truncated to 512 tokens}
+{last 3 turns concatenated, truncated to 512 tokens}
 <|im_end|>
 <|im_start|>assistant
 ```
+
+**Critical — what NOT to include in the system block:**
+- `loaded: true/false` — changes on every model load/evict → cache bust
+- VRAM usage — runtime state → cache bust
+- Request counts, timing — runtime state → cache bust
+
+The system block must be identical across all requests for the same scope+profile
+combination. Build it once per (scope, profile) pair and cache it as a string.
+Only the user block changes per request.
 
 Expected output (validated with `json.loads`, fallback to `"general"` on parse failure):
 ```json
@@ -354,10 +393,20 @@ if score < threshold and active_profile_cfg.get("use_assessor") and _assessor_pi
 ```
 
 `_run_assessor_routing()`:
-- Acquires `_assessor_lock` (routing decisions serialised)
-- Builds routing prompt
+- Acquires `_assessor_lock` (routing pre-turn serialised — lock released before task starts)
+- Builds routing prompt (cached string for current scope+profile)
 - Calls `_assessor_pipe.generate()` in executor with `max_new_tokens=256`
-- Parses JSON; falls back to `("general", 0.0)` on any error
+- Releases `_assessor_lock`
+- Parses JSON; falls back to `("general", 0.0)` on any error — never raises
+
+**Assessor unavailable fallback:** If `_assessor_pipe is None` (model not on disk, or
+still loading), skip Stage 3 entirely. Use embedding result if score > 0.5 (relaxed
+threshold), else `"general"`. Log `[router] assessor not available — using fallback`.
+
+**Concurrency note:** After routing, if task model = assessor model, task execution
+uses `_infer_lock(model_id)` — NOT `_assessor_lock`. The two locks are independent.
+Concurrent requests: Request A routing (holds `_assessor_lock` briefly) does NOT block
+Request B using assessor for task execution under `_infer_lock`.
 
 When task resolves to assessor model (`qwen3-8b-int4-ov`), reuse `_assessor_pipe`
 for task execution — no second pipeline loaded.
@@ -402,25 +451,41 @@ output in its context.
 
 ---
 
-### Step 4.2 — Web-search → summarise scenario
+### Step 4.2 — Tool-assisted web-search → summarise scenario
 
-**Files:** `ov_server.py` (assessor prompt update), test
+**Files:** `ov_server.py` (assessor prompt update, pipeline executor), test
 
-Update assessor prompt to include the `web_search` multi-step template:
+**Architecture note:** The server never initiates HTTP requests. Web search is always
+initiated by the client (AnythingLLM, Open WebUI) which provides search tools. The
+pipeline here is:
+```
+Step 0 (client): client detects "search" intent, injects search tool into req.tools
+Step 1 (server): qwen3-8b calls the search tool → client executes HTTP → returns results
+Step 2 (server): qwen3-14b receives search results as context → produces summary
+```
+
+Update assessor prompt template for `web_search` multi-step:
 ```json
 {
   "task_class": "web_search",
   "steps": [
-    { "model": "qwen3-8b-int4-ov",  "provider": "loc", "purpose": "extract search terms and scrape" },
-    { "model": "qwen3-14b-int4-ov", "provider": "loc", "purpose": "summarise results" }
+    { "model": "qwen3-8b-int4-ov",  "provider": "loc",
+      "purpose": "call search tool and extract relevant results" },
+    { "model": "qwen3-14b-int4-ov", "provider": "loc",
+      "purpose": "synthesise search results into a coherent answer",
+      "depends_on": [0] }
   ]
 }
 ```
 
-Test end-to-end: "search for recent OpenVINO release notes" → assessor emits 2-step
-graph → step 1 extracts/scrapes → step 2 summarises → streamed to client.
+**Context passing between steps:** Step 1 output (tool call result as returned by
+client) is injected as a `tool` role message into step 2's context. Truncate to 75%
+of step-2 model's KV budget to prevent overflow.
 
-**Phase 4 complete when:** at least the web-search scenario works end-to-end.
+Test: AnythingLLM with web-search enabled sends request → assessor routes to 2-step
+graph → step 1 (8b) calls search tool → step 2 (14b) summarises → streamed to client.
+
+**Phase 4 complete when:** at least the tool-assisted web-search scenario works end-to-end.
 
 ---
 

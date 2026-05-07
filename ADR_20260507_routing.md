@@ -87,30 +87,48 @@ list. Models are annotated with `provider` and `tier`:
 
 Task classes defined at launch: `vision`, `web_search`, `document`, `code`, `general`.
 
+**`web_search` clarification:** This class does NOT mean the server initiates web
+scraping. It signals that the client (AnythingLLM, Open WebUI) has provided web-search
+tools and the model needs to call them. The routing decision selects a fast,
+tool-capable model to handle the tool-call round-trips efficiently. Multi-step
+orchestration (Phase 4) will decompose: tool-call step → summarise step, but both steps
+are still LLM inference — the actual HTTP search request is issued by the client.
+
 ### 4. Routing pipeline
 
 ```
 Request
   │
-  ├─ explicit model in req.model? ──────────────────────────── bypass, dispatch directly
+  ├─ explicit model in req.model? ──────── dispatch directly, log strategy="explicit"
+  │    Policy: explicit override ignores provider_scope (advanced user).
+  │    Log a warning if model provider conflicts with active scope.
   │
   ├─ STAGE 1 — signal rules  (<1 ms)
-  │    has_image           → vision
-  │    has_tools           → dispatch to assessor directly (tool-capable model needed)
-  │    long_context        → document
-  │    keyword match       → web_search
+  │    has_image      → "vision"
+  │    has_tools      → "web_search"  (tool-call request; select fast tool-capable model)
+  │                     NOTE: fast profile routes here via _select_model, not assessor.
+  │                     precise/laborious: assessor can still fire if score < threshold.
+  │    long_context   → "document"
+  │    keyword match  → "web_search"
   │    → match? dispatch.  → no match? next stage.
   │
-  ├─ STAGE 2 — embedding similarity  (~10 ms, e5-large already loaded)
-  │    Embed query → cosine sim against task-class description centroids
-  │    → sim ≥ threshold (default 0.72)? dispatch.
+  ├─ STAGE 2 — embedding similarity  (~10 ms, e5-large already in VRAM)
+  │    Input: concatenation of last 3 turns (not just last message).
+  │    Embed → cosine sim against task-class centroids (pre-computed at startup,
+  │    after e5-large is loaded — blocking step before server accepts requests).
+  │    → sim ≥ threshold? dispatch.
   │    → sim < threshold? next stage.
   │
   └─ STAGE 3 — assessor  (~1–2 s, precise/laborious only)
        Hidden pre-turn to qwen3-8b with routing prompt.
        Output: JSON task graph (single step now; multi-step in Phase 4).
-       fast profile: stages 1–2 only, no assessor.
+       fast profile: stages 1–2 only; falls back to "general" on low confidence.
+       Assessor unavailable (not loaded): same fallback as fast profile.
 ```
+
+**TTFT implication:** Stage 3 adds 1–2 s before first token reaches the client.
+Streaming responses will appear frozen during assessor inference. `fast` profile avoids
+this entirely. For `precise`/`laborious`, this is an accepted trade-off.
 
 Routing decision is logged and exposed in `GET /health` as `last_routing_decision`.
 
@@ -134,8 +152,16 @@ When the routing decision selects `qwen3-8b` as the task model, the assessor pip
 is **reused** for the task execution — no second pipeline is loaded, no extra VRAM
 consumed.
 
-Assessor routing prompt is prefix-cacheable: the system block (task class descriptions
-+ model catalogue) is static per scope/profile combination and will cache on warm turns.
+**Concurrency model:** `_assessor_lock` is held only during the routing pre-turn
+(~256 tokens). When the assessor pipeline is reused for task execution, it runs under
+the normal per-model `_infer_lock(model_id)`, not `_assessor_lock`. This prevents
+routing and task execution from serialising against each other on concurrent requests.
+
+**Routing prompt prefix caching:** The system block must contain ONLY static data —
+task class descriptions and model IDs from config. It must NOT include runtime state
+(`loaded: true/false`, VRAM usage, current request count). Dynamic data busts the
+prefix cache on every model load/evict, eliminating the caching benefit entirely.
+The `loaded` status is relevant only to the catalogue endpoint, not the routing prompt.
 
 ### 6. Routing task graph (serialised JSON)
 
@@ -191,16 +217,23 @@ Each entry includes:
 
 | Gap | Mitigation |
 |---|---|
-| Tool-call requests need tool-capable model | `has_tools` signal → dispatch to assessor pipeline directly |
-| Assessor not ready at startup | `@app.on_event("startup")` preloads assessor; `precise`/`laborious` requests queue behind preload |
+| `has_tools` + `fast` profile contradicts assessor bypass | `has_tools` → `"web_search"` task class; `_select_model()` picks fastest tool-capable model; no assessor involved |
+| Explicit model override conflicts with provider_scope | Policy: explicit override always honoured; scope conflict logged as warning, not rejected |
+| Assessor lock held for routing blocks task reuse | Routing uses `_assessor_lock`; task execution uses `_infer_lock(model_id)` — separate locks |
+| Routing prompt includes dynamic state → prefix cache busted | Static block contains only config-derived data (class descriptions, model IDs); no runtime state |
+| `web_search` implies server scrapes web | Clarified: selects tool-capable model for client-provided search tools; server never initiates HTTP |
+| Centroid computation races with first request | Startup sequence: (1) load e5-large, (2) compute centroids — both blocking before accepting requests |
+| Routing embeds only last message; context-dependent queries misrouted | Stage 2 embeds concatenation of last 3 turns |
+| Selected model not on disk | `_select_model()` validates against `AVAILABLE_MODELS`; escalates tier/provider until a valid model is found |
+| Assessor not loaded (model missing from disk) | Routing falls back to embedding stage 2 result (`"general"` on low confidence); logged as warning |
+| Assessor not ready at startup | `@app.on_event("startup")` preloads assessor as background task; requests that need it queue briefly |
 | OVH unavailable mid-session | Cached catalogue retained; affected models silently skipped; fallback to local |
-| Assessor adds TTFT latency | `fast` profile skips assessor entirely; rule/embedding path is <15 ms |
 | qwen3-8b in task pool AND assessor = double VRAM | Assessor pipeline reused when task model resolves to qwen3-8b |
 | `active_profile` hardcoded in server | Read from `config.json` at startup; runtime switch via `/admin/profile` as before |
 | Embedding threshold not tunable | `router.embedding_threshold` in config (default 0.72); operator-adjustable |
-| VLM + assessor + 2 task models > 24 GB | VLM load still evicts LRU task models; assessor is never evicted |
+| VLM + assessor + 2 task models > 24 GB | VLM load evicts LRU task models; assessor excluded from eviction (not in `loaded_models`) |
 | Pipeline executor interface not future-proof | Task graph JSON from day 1, even for single-step routing |
-| No cost tracking | `GET /health` will include `estimated_session_cost_usd` (sum of OVH token costs) |
+| No cost tracking | `GET /health` includes `estimated_session_cost_usd` (accumulated from OVH response usage fields) |
 
 ---
 
