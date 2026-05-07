@@ -165,11 +165,21 @@
 
 ---
 
+### 2026-05-07 — Session 17 (63f6cf0)
+**Working on:** Routing architecture design, gap analysis, ovs_upgrade.md integration, ADR/PLAN authoring
+**Last commit:** 63f6cf0 — docs: reframe dual-GPU as optional developer experiment
+**Next action:** PLAN_routing.md Phase 1 Step 1.1
+**Blocked on:** nothing
+**Open questions:** Embedding threshold and OVH TTL need tuning after Phase 2 ships
+**Tests:** 0/0 — no test files remain
+
+---
+
 ## NOW
 
-**Working on:** Intelligent routing architecture — ADR written, plan ready, no code yet
-**Last commit:** 73c38d6 — docs: integrate ovs_upgrade.md findings into routing ADR and plan
-**Next action:** PLAN_routing.md Phase 1 Step 1.1 — new config.json schema + `_load_config()` defaults
+**Working on:** Design phase complete — ADR, PLAN, gap analysis, streaming fixes all documented
+**Last commit:** (session-wrap commit below)
+**Next action:** PLAN_routing.md Phase 1 Step 1.1 — new config.json schema + `_load_config()` update
 **Blocked on:** nothing
-**Open questions:** (1) Embedding threshold 0.72 — will need tuning on real queries after Phase 2 is live. (2) OVH catalogue TTL 300s — adjust if OVH model list changes frequently. (3) STT Phase 1 still queued (lower priority than routing).
+**Open questions:** (1) Embedding threshold 0.72 — tune after Phase 2 live on real queries. (2) OVH TTL 300s — watch if model list changes frequently. (3) STT Phase 1 still queued, lower priority than routing.
 **Tests:** 0/0 — no test files remain
