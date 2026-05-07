@@ -178,7 +178,7 @@
 ## NOW
 
 **Working on:** Design phase complete — ADR, PLAN, gap analysis, streaming fixes all documented
-**Last commit:** (session-wrap commit below)
+**Last commit:** 584f027 — docs: session wrap — routing architecture complete, ready for Phase 1 implementation
 **Next action:** PLAN_routing.md Phase 1 Step 1.1 — new config.json schema + `_load_config()` update
 **Blocked on:** nothing
 **Open questions:** (1) Embedding threshold 0.72 — tune after Phase 2 live on real queries. (2) OVH TTL 300s — watch if model list changes frequently. (3) STT Phase 1 still queued, lower priority than routing.
