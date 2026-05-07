@@ -4,25 +4,33 @@ No GPU, no model loading, no network calls required.
 conftest.py stubs out openvino_genai / transformers / optimum before import.
 """
 import json
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
 import logging
+import tempfile
+import time
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 import ov_server
 from ov_server import (
     ContentPart,
     Message,
+    _build_catalogue,
+    _catalogue_cache,
     _discover_models,
     _discover_vlm_models,
     _extract_agent_json,
+    _fetch_ovh_catalogue,
     _has_images,
     _limit_image_history,
     _load_config,
+    _local_catalogue,
     _pick_backend_name,
+    _refresh_catalogue,
+    _scope_includes,
     _text_content,
+    _tier_map_for_provider,
     _validate_config,
     decode_result,
     extract_thinking,
@@ -636,3 +644,293 @@ class TestValidateConfig:
         with caplog.at_level(logging.WARNING, logger="ov_server"):
             _validate_config(cfg)
         assert "Unrecognised" not in caplog.text
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Catalogue helpers — _tier_map_for_provider, _local_catalogue, _build_catalogue
+# ──────────────────────────────────────────────────────────────────────────────
+
+_TASK_CLASSES_FIXTURE = {
+    "general": {
+        "description": "General",
+        "models": [
+            {"id": "small-llm", "provider": "loc", "tier": "fast"},
+            {"id": "big-llm",   "provider": "loc", "tier": "best"},
+            {"id": "cloud-llm", "provider": "ovh", "tier": "best"},
+        ],
+    },
+    "code": {
+        "description": "Code",
+        "models": [
+            {"id": "small-llm", "provider": "loc", "tier": "best"},  # promoted to best
+        ],
+    },
+}
+
+
+class TestScopeIncludes:
+    def test_local_scope_excludes_ovh(self):
+        assert not _scope_includes("local", "ovh")
+
+    def test_local_plus_ovh_includes_ovh(self):
+        assert _scope_includes("local+ovh", "ovh")
+
+    def test_all_scope_includes_configured_provider(self):
+        with patch.dict(ov_server._cfg, {"providers": {"ovh": {}}}):
+            assert _scope_includes("all", "ovh")
+
+    def test_all_scope_excludes_unconfigured_provider(self):
+        with patch.dict(ov_server._cfg, {"providers": {}}):
+            assert not _scope_includes("all", "ovh")
+
+    def test_local_scope_excludes_any_remote(self):
+        with patch.dict(ov_server._cfg, {"providers": {"ovh": {}}}):
+            assert not _scope_includes("local", "ovh")
+
+
+class TestTierMapForProvider:
+    def test_loc_tier_map(self):
+        with patch.dict(ov_server._cfg, {"task_classes": _TASK_CLASSES_FIXTURE}):
+            m = _tier_map_for_provider("loc")
+        # small-llm appears as "fast" in general and "best" in code → should be "best"
+        assert m["small-llm"] == "best"
+        assert m["big-llm"] == "best"
+        assert "cloud-llm" not in m
+
+    def test_ovh_tier_map(self):
+        with patch.dict(ov_server._cfg, {"task_classes": _TASK_CLASSES_FIXTURE}):
+            m = _tier_map_for_provider("ovh")
+        assert m["cloud-llm"] == "best"
+        assert "small-llm" not in m
+
+    def test_unknown_provider_returns_empty(self):
+        with patch.dict(ov_server._cfg, {"task_classes": _TASK_CLASSES_FIXTURE}):
+            m = _tier_map_for_provider("ext")
+        assert m == {}
+
+    def test_empty_task_classes(self):
+        with patch.dict(ov_server._cfg, {"task_classes": {}}):
+            m = _tier_map_for_provider("loc")
+        assert m == {}
+
+
+class TestLocalCatalogue:
+    def _run(self, available_models, available_vlm, loaded, loaded_vlm, task_classes):
+        with (
+            patch.object(ov_server, "AVAILABLE_MODELS", available_models),
+            patch.object(ov_server, "AVAILABLE_VLM_MODELS", available_vlm),
+            patch.object(ov_server, "loaded_models", loaded),
+            patch.object(ov_server, "loaded_vlm_models", loaded_vlm),
+            patch.dict(ov_server._cfg, {"task_classes": task_classes}),
+        ):
+            return _local_catalogue()
+
+    def test_returns_list(self):
+        result = self._run({"m1": "/p"}, {}, {}, {}, {})
+        assert isinstance(result, list)
+
+    def test_each_entry_has_required_fields(self):
+        result = self._run({"m1": "/p"}, {}, {}, {}, {})
+        entry = result[0]
+        for field in ("id", "object", "provider", "tier", "context_length", "pricing", "loaded"):
+            assert field in entry, f"Missing field '{field}'"
+
+    def test_provider_is_loc(self):
+        result = self._run({"m1": "/p"}, {}, {}, {}, {})
+        assert all(e["provider"] == "loc" for e in result)
+
+    def test_loaded_flag_reflects_state(self):
+        result = self._run({"m1": "/p", "m2": "/q"}, {}, {"m1": object()}, {}, {})
+        by_id = {e["id"]: e for e in result}
+        assert by_id["m1"]["loaded"] is True
+        assert by_id["m2"]["loaded"] is False
+
+    def test_tier_from_task_classes(self):
+        tc = {"code": {"models": [{"id": "m1", "provider": "loc", "tier": "best"}]}}
+        result = self._run({"m1": "/p"}, {}, {}, {}, tc)
+        assert result[0]["tier"] == "best"
+
+    def test_tier_defaults_to_fast_when_not_in_task_classes(self):
+        result = self._run({"unknown-model": "/p"}, {}, {}, {}, {})
+        assert result[0]["tier"] == "fast"
+
+    def test_vlm_models_included(self):
+        result = self._run({}, {"vlm1": "/v"}, {}, {}, {})
+        ids = [e["id"] for e in result]
+        assert "vlm1" in ids
+
+    def test_both_llm_and_vlm_present(self):
+        result = self._run({"llm": "/l"}, {"vlm": "/v"}, {}, {}, {})
+        ids = {e["id"] for e in result}
+        assert {"llm", "vlm"} == ids
+
+    def test_context_length_is_none(self):
+        result = self._run({"m1": "/p"}, {}, {}, {}, {})
+        assert result[0]["context_length"] is None
+
+    def test_pricing_is_none(self):
+        result = self._run({"m1": "/p"}, {}, {}, {}, {})
+        assert result[0]["pricing"] is None
+
+
+class TestBuildCatalogue:
+    def _with_local(self, ids):
+        entries = [{"id": i, "provider": "loc"} for i in ids]
+        return patch.object(ov_server, "_local_catalogue", return_value=entries)
+
+    def test_local_scope_returns_only_local(self):
+        with self._with_local(["m1", "m2"]):
+            ov_server._catalogue_cache.pop("ovh", None)
+            result = _build_catalogue("local")
+        assert all(e["provider"] == "loc" for e in result)
+        assert len(result) == 2
+
+    def test_local_scope_ignores_ovh_cache(self):
+        ov_server._catalogue_cache["ovh"] = ([{"id": "cloud", "provider": "ovh"}], time.time())
+        with self._with_local(["m1"]):
+            result = _build_catalogue("local")
+        ov_server._catalogue_cache.pop("ovh", None)
+        assert len(result) == 1
+        assert result[0]["id"] == "m1"
+
+    def test_ovh_scope_includes_cached_ovh(self):
+        ov_server._catalogue_cache["ovh"] = ([{"id": "cloud", "provider": "ovh"}], time.time())
+        with self._with_local(["m1"]):
+            result = _build_catalogue("local+ovh")
+        ov_server._catalogue_cache.pop("ovh", None)
+        ids = {e["id"] for e in result}
+        assert ids == {"m1", "cloud"}
+
+    def test_all_scope_includes_cached_ovh(self):
+        ov_server._catalogue_cache["ovh"] = ([{"id": "cloud", "provider": "ovh"}], time.time())
+        # "all" resolves via config.providers — ensure ovh is present
+        with (
+            self._with_local(["m1"]),
+            patch.dict(ov_server._cfg, {"providers": {"ovh": {}}}),
+        ):
+            result = _build_catalogue("all")
+        ov_server._catalogue_cache.pop("ovh", None)
+        ids = {e["id"] for e in result}
+        assert "cloud" in ids
+
+    def test_ovh_scope_with_empty_cache_returns_local_only(self):
+        ov_server._catalogue_cache.pop("ovh", None)
+        with self._with_local(["m1"]):
+            result = _build_catalogue("local+ovh")
+        assert len(result) == 1
+
+    def test_empty_available_models_returns_empty(self):
+        ov_server._catalogue_cache.pop("ovh", None)
+        with patch.object(ov_server, "_local_catalogue", return_value=[]):
+            result = _build_catalogue("local")
+        assert result == []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _fetch_ovh_catalogue (async)
+# ──────────────────────────────────────────────────────────────────────────────
+
+pytestmark_anyio = pytest.mark.anyio
+
+
+@pytest.mark.anyio
+class TestFetchOvhCatalogue:
+    def setup_method(self):
+        ov_server._catalogue_cache.pop("ovh", None)
+
+    def _mock_response(self, model_ids: list[str]):
+        data = [{"id": mid, "object": "model"} for mid in model_ids]
+        resp = MagicMock()
+        resp.json.return_value = {"data": data}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    async def test_fresh_fetch_populates_cache(self):
+        spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
+        resp = self._mock_response(["ModelA", "ModelB"])
+        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value.get = AsyncMock(return_value=resp)
+            result = await _fetch_ovh_catalogue(spec)
+        assert len(result) == 2
+        assert any(e["id"] == "ModelA" for e in result)
+        assert "ovh" in ov_server._catalogue_cache
+
+    async def test_provider_is_ovh(self):
+        spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
+        resp = self._mock_response(["ModelA"])
+        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value.get = AsyncMock(return_value=resp)
+            result = await _fetch_ovh_catalogue(spec)
+        assert all(e["provider"] == "ovh" for e in result)
+
+    async def test_loaded_is_always_false(self):
+        spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
+        resp = self._mock_response(["ModelA"])
+        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value.get = AsyncMock(return_value=resp)
+            result = await _fetch_ovh_catalogue(spec)
+        assert all(e["loaded"] is False for e in result)
+
+    async def test_cache_hit_skips_http(self):
+        cached = [{"id": "cached-model", "provider": "ovh"}]
+        ov_server._catalogue_cache["ovh"] = (cached, time.time())
+        spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
+        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+            result = await _fetch_ovh_catalogue(spec)
+            mock_cls.assert_not_called()
+        assert result == cached
+        ov_server._catalogue_cache.pop("ovh", None)
+
+    async def test_expired_cache_triggers_refetch(self):
+        old = [{"id": "old-model", "provider": "ovh"}]
+        ov_server._catalogue_cache["ovh"] = (old, time.time() - 400)  # expired
+        spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
+        resp = self._mock_response(["new-model"])
+        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value.get = AsyncMock(return_value=resp)
+            result = await _fetch_ovh_catalogue(spec)
+        assert any(e["id"] == "new-model" for e in result)
+        ov_server._catalogue_cache.pop("ovh", None)
+
+    async def test_network_error_returns_empty_when_no_cache(self):
+        spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
+        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value.get = AsyncMock(
+                side_effect=Exception("connection refused")
+            )
+            result = await _fetch_ovh_catalogue(spec)
+        assert result == []
+
+    async def test_network_error_returns_stale_cache(self):
+        stale = [{"id": "stale", "provider": "ovh"}]
+        ov_server._catalogue_cache["ovh"] = (stale, time.time() - 9999)  # very stale
+        spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
+        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value.get = AsyncMock(
+                side_effect=Exception("timeout")
+            )
+            result = await _fetch_ovh_catalogue(spec)
+        assert result == stale
+        ov_server._catalogue_cache.pop("ovh", None)
+
+    async def test_tier_from_task_classes_applied(self):
+        tc = {"code": {"models": [{"id": "ModelA", "provider": "ovh", "tier": "fast"}]}}
+        spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
+        resp = self._mock_response(["ModelA"])
+        with (
+            patch.dict(ov_server._cfg, {"task_classes": tc}),
+            patch("ov_server.httpx.AsyncClient") as mock_cls,
+        ):
+            mock_cls.return_value.__aenter__.return_value.get = AsyncMock(return_value=resp)
+            result = await _fetch_ovh_catalogue(spec)
+        assert result[0]["tier"] == "fast"
+        ov_server._catalogue_cache.pop("ovh", None)
+
+    async def test_unknown_model_defaults_to_best_tier(self):
+        spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
+        resp = self._mock_response(["UnknownCloud"])
+        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__.return_value.get = AsyncMock(return_value=resp)
+            result = await _fetch_ovh_catalogue(spec)
+        assert result[0]["tier"] == "best"
+        ov_server._catalogue_cache.pop("ovh", None)
