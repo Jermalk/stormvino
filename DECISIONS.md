@@ -196,3 +196,35 @@
 **Rationale:** Fixes the pipeline executor interface at Phase 1 so Phases 4-5 (multi-step) are additive changes with no interface rewrites.
 **Rejected alternative:** Simple `{model_id}` return in Phase 1, upgrade later — would require changing the executor interface mid-project.
 **Affects:** ov_server.py routing pipeline + task graph executor, PLAN_routing.md
+
+---
+
+### 2026-05-07 — Test suite architecture (conftest + pytest-watch)
+**Decision:** Stub `openvino_genai`, `transformers`, `optimum.intel` in `tests/conftest.py` via `sys.modules` before any import; run all tests with `pytest-watch` (`ptw`) for auto-rerun.
+**Rationale:** `transformers` has a `huggingface-hub` version conflict on this machine; `openvino_genai` requires GPU for real use. Stubbing at import time avoids both problems and keeps the suite fast (0.3 s for 113 tests). `pytest-watch` uses `inotify` under the hood so no polling.
+**Rejected alternative:** Mocking at test level (too repetitive); running tests only with real GPU (too slow, blocks CI).
+**Affects:** `tests/conftest.py`, all test files
+
+---
+
+### 2026-05-07 — _build_catalogue sync/async split
+**Decision:** `_build_catalogue(scope)` is synchronous and reads from `_catalogue_cache`; `_fetch_ovh_catalogue(spec)` is async and updates the cache; `_refresh_catalogue(scope)` is the async trigger called by routes before reading.
+**Rationale:** Keeping the read path sync makes `_build_catalogue` trivially testable without an event loop and callable from any context. The async fetch is isolated to one function with a clear contract (TTL check + error fallback).
+**Rejected alternative:** Single async `_build_catalogue` — harder to test; would force `asyncio.run()` in all callers.
+**Affects:** `ov_server.py` catalogue section, `GET /v1/models` (Step 1.3)
+
+---
+
+### 2026-05-07 — _scope_includes handles "all" via config.providers lookup
+**Decision:** `_scope_includes("all", provider)` checks `provider in _cfg["providers"]`, not a hardcoded list. Substring match handles "local+ovh" etc.
+**Rationale:** "all" must be dynamic — if a new provider is added to config it should automatically be included without code changes. Substring match for explicit combinations keeps the common case simple.
+**Rejected alternative:** Hardcoded provider list — breaks when new providers are added.
+**Affects:** `_scope_includes()`, `_build_catalogue()`, `_refresh_catalogue()`
+
+---
+
+### 2026-05-07 — Tier promotion: "best" beats "fast" across task classes
+**Decision:** `_tier_map_for_provider()` assigns "best" to a model if ANY task class lists it with `tier: "best"`, regardless of other classes that list it as "fast".
+**Rationale:** A model that is the best option for any task class should be discoverable as "best" in the catalogue. "fast" is the floor, not a ceiling.
+**Rejected alternative:** First-match wins — order-dependent and surprising when the same model appears in multiple classes.
+**Affects:** `_tier_map_for_provider()`, `_local_catalogue()`, `_fetch_ovh_catalogue()`

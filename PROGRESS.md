@@ -175,11 +175,21 @@
 
 ---
 
+### 2026-05-07 — Session 18 (ac94d64)
+**Working on:** Phase 1 Step 1.2 complete — _build_catalogue, _fetch_ovh_catalogue, _scope_includes
+**Last commit:** ac94d64 — feat: Step 1.2 — _build_catalogue, _fetch_ovh_catalogue, _scope_includes
+**Next action:** PLAN_routing.md Phase 1 Step 1.3 — extended `GET /v1/models` using catalogue
+**Blocked on:** nothing
+**Open questions:** (1) Embedding threshold 0.72 — tune after Phase 2 live. (2) OVH TTL 300s. (3) STT queued.
+**Tests:** pass (113/113) — `make test`
+
+---
+
 ## NOW
 
-**Working on:** Design phase complete — ADR, PLAN, gap analysis, streaming fixes all documented
-**Last commit:** 584f027 — docs: session wrap — routing architecture complete, ready for Phase 1 implementation
-**Next action:** PLAN_routing.md Phase 1 Step 1.1 — new config.json schema + `_load_config()` update
+**Working on:** Phase 1 Steps 1.1–1.2 complete
+**Last commit:** ac94d64 — feat: Step 1.2 — _build_catalogue, _fetch_ovh_catalogue, _scope_includes
+**Next action:** PLAN_routing.md Phase 1 Step 1.3 — extended `GET /v1/models` using catalogue
 **Blocked on:** nothing
-**Open questions:** (1) Embedding threshold 0.72 — tune after Phase 2 live on real queries. (2) OVH TTL 300s — watch if model list changes frequently. (3) STT Phase 1 still queued, lower priority than routing.
-**Tests:** 0/0 — no test files remain
+**Open questions:** (1) Embedding threshold 0.72 — tune after Phase 2 live. (2) OVH TTL 300s. (3) STT queued, lower priority.
+**Tests:** pass (113/113) — `make test`
