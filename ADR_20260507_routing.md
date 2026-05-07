@@ -265,25 +265,19 @@ Each entry includes:
 
 ---
 
-## Planned extensions — not in current scope
+## Optional future extensions
 
-### Dual-GPU (B50 + B60)
+### Dual-GPU (developer experiment — not a general design goal)
 
-When a second GPU (B50) is added to EnvyStorm, the assessor and embedding model are
-pinned permanently to B50. B60 is freed entirely for task model hot-swapping.
+The single-GPU architecture above is the primary and only supported configuration.
+A second GPU (B50) is a personal experiment by the developer; most users will have
+one card only and this section does not apply to them.
 
-```
-B50 (smaller):  assessor (qwen3-8b) — permanent
-                embedding (e5-large) — permanent
-                centroid computation at startup
-
-B60 (B60):      task model pool — full VRAM available for hot-swap
-                VLM — on-demand
-```
-
-The routing architecture above requires no changes for this transition — only the
-device assignment per model in config changes. LRU eviction continues per-GPU
-independently. This is the target steady-state when B50 arrives.
+If a second GPU is ever added, the routing architecture requires no changes — only
+the device assignment per model in config would change. A natural mapping would be
+to pin the assessor and embedding model to the smaller card, freeing the B60 for
+task model hot-swapping. The single-GPU path remains the default and must never
+be degraded to accommodate a dual-GPU fast-path.
 
 ### VLM streaming (verify in Phase 2)
 
