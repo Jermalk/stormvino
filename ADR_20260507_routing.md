@@ -265,6 +265,36 @@ Each entry includes:
 
 ---
 
+## Planned extensions — not in current scope
+
+### Dual-GPU (B50 + B60)
+
+When a second GPU (B50) is added to EnvyStorm, the assessor and embedding model are
+pinned permanently to B50. B60 is freed entirely for task model hot-swapping.
+
+```
+B50 (smaller):  assessor (qwen3-8b) — permanent
+                embedding (e5-large) — permanent
+                centroid computation at startup
+
+B60 (B60):      task model pool — full VRAM available for hot-swap
+                VLM — on-demand
+```
+
+The routing architecture above requires no changes for this transition — only the
+device assignment per model in config changes. LRU eviction continues per-GPU
+independently. This is the target steady-state when B50 arrives.
+
+### VLM streaming (verify in Phase 2)
+
+Current `_chat_vlm()` likely buffers the full VLM response. `VLMPipeline` in
+openvino_genai may support a callable streamer interface similar to `LLMPipeline`.
+Verify during Phase 2 — if supported, add the same `AsyncTokenStreamer` pattern
+(queue + event loop capture) used by the LLM path.
+
+---
+
 ## Implementation reference
 
 See `PLAN_routing.md` for the phase-by-phase step-by-step implementation plan.
+See `ovs_upgrade.md` for the streaming gap analysis that informed Phase 2 Step 2.6.

@@ -206,14 +206,31 @@ def _select_model(task_class: str, profile: dict) -> dict:
 Algorithm:
 1. Get model list for `task_class` from config
 2. Filter by `provider_scope`: skip entries whose provider is not in active scope
-3. Apply `model_preference`:
+3. Compute `complexity_score(req)` to refine preference within tier:
+   ```python
+   def complexity_score(req: ChatRequest) -> float:
+       """0.0 = simple, 1.0 = complex. Used to break ties within a tier."""
+       last_user = last_user_text(req)
+       score = 0.0
+       if len(last_user.split()) > 50:  score += 0.3
+       if len(last_user.split()) > 150: score += 0.2
+       hits = sum(1 for s in COMPLEXITY_SIGNALS if s in last_user.lower())
+       score += min(hits * 0.15, 0.4)
+       user_turns = sum(1 for m in req.messages if m.role == "user")
+       if user_turns > 4: score += 0.1
+       if SIMPLE_Q_RE.match(last_user.strip()): score -= 0.3
+       return max(0.0, min(1.0, score))
+   ```
+   `COMPLEXITY_SIGNALS` and `SIMPLE_Q_RE` defined as module-level constants from config.
+   When `model_preference == "balanced"` and `complexity_score > 0.65` → promote to `"best"`.
+4. Apply `model_preference` with complexity adjustment:
    - `fastest` → first entry with `tier: fast` and `provider: loc`
-   - `balanced` → last entry with `provider: loc`
+   - `balanced` → last entry with `provider: loc` (promoted to `best` if high complexity)
    - `best` → last entry overall (may be `ovh` if scope allows)
-4. Validate against `AVAILABLE_MODELS`: if selected model is not on disk, move to next
+5. Validate against `AVAILABLE_MODELS`: if selected model is not on disk, move to next
    candidate in list (escalate tier, then provider). Log warning per skip.
-5. Escalate preference if no match in tier: `fastest → balanced → best → any available`
-6. If list is empty after all filtering → return assessor model as emergency fallback + log error
+6. Escalate preference if no match in tier: `fastest → balanced → best → any available`
+7. If list is empty after all filtering → return assessor model as emergency fallback + log error
 
 **Test:** Unit tests covering all preference × scope combinations for each task class.
 
@@ -272,8 +289,105 @@ Apply profile behavioral settings:
 
 ov-monitor: add "Last route" row to server panel showing `task_class → model (strategy)`.
 
-**Phase 2 complete when:** all requests are routed automatically, routing decision visible
-in monitor, profile behavioral settings applied.
+---
+
+### Step 2.6 — Streaming fixes (three in one step)
+
+**Files:** `ov_server.py` (`token_generator()`, `full_stream()`, `agent_stream()`)
+
+Three standalone streaming improvements, all low-effort, all needed for OpenAI client
+compatibility. Implement together — they share the same token pipeline.
+
+**A — Usage stats in final stream chunk**
+
+OpenAI spec requires a final SSE chunk before `[DONE]` containing token usage.
+LangChain, AnythingLLM billing wrappers, and context managers depend on this.
+
+Add to end of `full_stream()` and `agent_stream()`:
+```python
+usage_chunk = {
+    "id": f"chatcmpl-{chunk_id}",
+    "object": "chat.completion.chunk",
+    "model": model_id,
+    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    "usage": {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens,
+    }
+}
+yield f"data: {json.dumps(usage_chunk)}\n\n"
+yield "data: [DONE]\n\n"
+```
+
+**B — Think block streaming with profile-driven strategy**
+
+Replace the current inline `<think>` suppression with a proper streaming handler.
+Strategy is driven by active profile:
+- `fast` → suppress (emit nothing from `<think>` block)
+- `precise` / `laborious` → `reasoning_content` field (Open WebUI / DeepSeek R1 compatible)
+
+```python
+class ThinkStreamHandler:
+    """Buffer <think> blocks; emit content or reasoning_content depending on strategy."""
+    def __init__(self, strategy: str = "suppress"):
+        self.strategy = strategy   # "suppress" | "separate_field"
+        self.buf = ""
+        self.in_think = False
+        self.think_acc = ""
+
+    def feed(self, token: str) -> list[dict]:
+        """Return list of delta dicts to emit (may be empty during buffering)."""
+        self.buf += token
+        out = []
+        if not self.in_think:
+            if "<think>" in self.buf:
+                before, _, rest = self.buf.partition("<think>")
+                if before.strip():
+                    out.append({"content": before})
+                self.buf, self.in_think, self.think_acc = rest, True, ""
+            else:
+                safe, self.buf = self.buf[:-8], self.buf[-8:]
+                if safe:
+                    out.append({"content": safe})
+        else:
+            if "</think>" in self.buf:
+                think_raw, _, rest = self.buf.partition("</think>")
+                self.think_acc += think_raw
+                self.buf, self.in_think = rest, False
+                if self.strategy == "separate_field":
+                    out.append({"content": "", "reasoning_content": self.think_acc})
+        return out
+
+    def flush(self) -> list[dict]:
+        return [{"content": self.buf}] if self.buf and not self.in_think else []
+```
+
+**C — Tool call streaming (partial — defer buffered-only for now)**
+
+The current code buffers the entire agent response when tools are present. Keep this
+behaviour for now but add a `StreamingToolCallHandler` stub that can be activated
+per-request when a streaming tool-call response is needed. Full streaming tool call
+support (emit content tokens before the tool block, buffer only the tool block) is a
+Phase 3 follow-up once the assessor is in place to reliably detect tool-call intent.
+
+**`model: "auto"` convention (add here)**
+
+Add `"auto"` as a recognized model name that always triggers routing. Unknown model
+names still fall through to routing with a log warning. This makes the contract
+explicit for clients that want automatic dispatch.
+
+```python
+ROUTING_TRIGGER_MODELS = {"auto", ""}   # empty string = no model specified
+```
+
+**Test:** 
+- Send streaming request, inspect last two events before `[DONE]` — must include usage chunk
+- Open WebUI: thinking should appear in a collapsed reasoning panel (separate_field strategy)
+- `curl` with `model: "auto"` — should route and log routing decision
+
+**Phase 2 complete when:** all requests routed automatically, streaming fixes live,
+routing decision visible in monitor.
 
 ---
 
@@ -525,3 +639,5 @@ by `_select_model()` when provider is `ovh`, not by the profile system.
 | Assessor VRAM + 2 task models > 24 GB | Low | High | Assessor reuses pipeline when task = qwen3-8b; VLM evicts task models |
 | OVH catalogue stale during provider outage | Low | Low | Cache retained; affected models skipped silently |
 | Phase 4 step context blows KV budget | Medium | Medium | Truncate step context to 75% of KV budget before feeding next step |
+| VLM pipeline may not support streaming | Medium | Low | Verify in Phase 2; wrap with thread+queue pattern if needed (same as LLM path) |
+| complexity_score constants poorly calibrated | Medium | Low | Tune COMPLEXITY_SIGNALS and threshold from real query logs after Phase 2 ships |
