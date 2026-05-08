@@ -1394,24 +1394,30 @@ def complexity_score(req: "ChatRequest") -> float:
     return max(0.0, min(1.0, score))
 
 
-def _select_model(task_class: str, profile: dict, complexity: float = 0.0) -> dict:
+def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
+                  estimated_tokens: int = 0) -> dict:
     """Return {id, provider} for the best available model given task class and profile.
 
     Preference escalation: fastest → balanced → best → any available.
     balanced + complexity > 0.65 promotes to best.
     Models not on disk (provider=loc, absent from AVAILABLE_MODELS) are skipped with a warning.
+    Models whose max_context_tokens < estimated_tokens are skipped (context overflow guard).
     Falls back to AGENT_MODEL if nothing is available.
     """
     all_models: list[dict] = _cfg.get("task_classes", {}).get(task_class, {}).get("models", [])
     scope: str = _cfg.get("provider_scope", "local")
 
-    # Filter by active scope, log skipped unavailable local models
+    # Filter by scope, availability, and context limit
     available: list[dict] = []
     for m in all_models:
         if not _scope_includes(scope, m.get("provider", "loc")):
             continue
         if m.get("provider") == "loc" and m["id"] not in AVAILABLE_MODELS and m["id"] not in AVAILABLE_VLM_MODELS:
             log.warning(f"[router] '{m['id']}' not on disk — skipped (task_class='{task_class}')")
+            continue
+        limit = m.get("max_context_tokens", 0)
+        if limit and estimated_tokens > limit:
+            log.info(f"[router] '{m['id']}' context {limit}tk < prompt ~{estimated_tokens}tk — skipped")
             continue
         available.append(m)
 
@@ -1844,7 +1850,8 @@ async def chat(req: ChatRequest):
         if strategy == "rule":
             _route_confidence = 1.0
         cplx = complexity_score(req)
-        model_entry = _select_model(task_class, active_profile_cfg, cplx)
+        est_tokens = sum(len(_text_content(m)) for m in req.messages) // 4
+        model_entry = _select_model(task_class, active_profile_cfg, cplx, est_tokens)
         model_id = model_entry["id"]
         routing_decision = {"task_class": task_class, "model": model_id, "strategy": strategy}
         log.info(f"[router] {strategy} → task_class='{task_class}' model='{model_id}'")
