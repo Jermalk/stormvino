@@ -35,6 +35,7 @@
     "default_model": "qwen3-14b-int4-ov",
     "agent_model":   "qwen3-14b-int4-ov",
     "blocked_models": [
+        "phi-4-int4-ov",
         "qwen3-30b-a3b-int4-ov",
         "qwen3-30b-a3b-int4-ov-bak",
         "qwen3-coder-30b-a3b-int4-ov"

@@ -1617,6 +1617,25 @@ async def chat(req: ChatRequest):
     if req.model in _blocked:
         raise HTTPException(status_code=400, detail=f"Model '{req.model}' is blocked on this server.")
 
+    # Explicit OVH model: client named a model from the OVH catalogue directly.
+    # Proxy it immediately — do not run task-class routing.
+    if req.model not in ROUTING_TRIGGER_MODELS and req.model not in AVAILABLE_MODELS:
+        _ovh_entries, _ = _catalogue_cache.get("ovh", ([], 0.0))
+        if any(e["id"] == req.model for e in _ovh_entries):
+            backends = _cfg.get("routing", {}).get("backends", {})
+            ovh_spec = backends.get("ovh")
+            if ovh_spec:
+                spec = dict(ovh_spec, model=req.model)
+                routing_decision = {
+                    "strategy": "explicit_ovh", "task_class": None,
+                    "model": req.model, "confidence": 1.0,
+                    "latency_ms": round((time.perf_counter() - _route_t0) * 1000),
+                }
+                _last_routing_decision = routing_decision
+                log.info(f"[router] explicit_ovh → model='{req.model}'")
+                return await _proxy_chat(req, spec)
+        log.warning(f"[router] unknown model '{req.model}' not local or OVH — routing as auto")
+
     if req.model not in ROUTING_TRIGGER_MODELS and req.model in AVAILABLE_MODELS:
         # Explicit local model — bypass routing
         model_id = req.model
