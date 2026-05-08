@@ -32,17 +32,15 @@
         }
     },
 
-    "default_model": "phi-4-int4-ov",
-    "agent_model":   "phi-4-int4-ov",
+    "default_model": "qwen3-14b-int4-ov",
+    "agent_model":   "qwen3-14b-int4-ov",
     "blocked_models": [
         "qwen3-30b-a3b-int4-ov",
         "qwen3-30b-a3b-int4-ov-bak",
         "qwen3-coder-30b-a3b-int4-ov"
     ],
 
-    "model_kv_overrides": {
-        "phi-4-int4-ov": 5
-    },
+    "model_kv_overrides": {},
 
     "assessor": {
         "model":          "qwen3-8b-int4-ov",
@@ -64,7 +62,7 @@
     "profiles": {
         "fast": {
             "thinking":         false,
-            "max_new_tokens":   512,
+            "max_new_tokens":   2048,
             "model_preference": "fastest"
         },
         "precise": {
@@ -108,7 +106,6 @@
             "signal":      "long_context",
             "context_threshold_tokens": 4000,
             "models": [
-                { "id": "phi-4-int4-ov",          "provider": "loc", "tier": "fast",     "max_context_tokens": 13000 },
                 { "id": "qwen3-8b-int4-ov",       "provider": "loc", "tier": "fast" },
                 { "id": "qwen3-14b-int4-ov",      "provider": "loc", "tier": "balanced" },
                 { "id": "Qwen3-32B",              "provider": "ovh", "tier": "fast" },
@@ -136,7 +133,6 @@
                 "jak zaplanować wakacje"
             ],
             "models": [
-                { "id": "phi-4-int4-ov",    "provider": "loc", "tier": "fast",     "max_context_tokens": 13000 },
                 { "id": "qwen3-8b-int4-ov", "provider": "loc", "tier": "fast" },
                 { "id": "qwen3-14b-int4-ov","provider": "loc", "tier": "balanced" },
                 { "id": "Qwen3-32B",        "provider": "ovh", "tier": "best" }

@@ -18,6 +18,13 @@ import numpy as np
 import db
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
+from prompt_builder import (
+    ContentPart, Message,
+    _text_content, build_vlm_prompt, build_prompt,
+    _extract_agent_json, parse_tool_calls,
+    decode_result, extract_thinking, format_thinking,
+    ThinkStreamHandler,
+)
 
 _request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
 
@@ -382,13 +389,6 @@ def check_memory():
 # ---------------------------------------------------------------------------
 # Content helpers — Message.content is str or list of parts (vision API)
 # ---------------------------------------------------------------------------
-def _text_content(msg: "Message") -> str:
-    """Extract plain text from a message whose content may be str or a list of parts."""
-    if isinstance(msg.content, list):
-        return " ".join(p.text for p in msg.content if p.type == "text" and p.text)
-    return msg.content or ""
-
-
 def _decode_image(url: str) -> Image.Image:
     if url.startswith("data:"):
         _, data = url.split(",", 1)
@@ -459,111 +459,6 @@ def _limit_image_history(messages: List["Message"]) -> List["Message"]:
     return result
 
 
-def build_vlm_prompt(messages: List["Message"], tokenizer: AutoTokenizer) -> str:
-    """Build a formatted prompt for VLMPipeline using the model's own chat template.
-    AutoTokenizer is used instead of AutoProcessor to avoid the torchvision dependency
-    pulled in by Qwen2.5-VL's video processor. The tokenizer's Jinja template handles
-    vision tokens identically."""
-    msg_dicts: List[Dict[str, Any]] = []
-    has_system = any(m.role == "system" for m in messages)
-    if not has_system:
-        msg_dicts.append({"role": "system", "content": "You are a helpful assistant."})
-    for m in messages:
-        if isinstance(m.content, list):
-            content: Any = []
-            for p in m.content:
-                if p.type == "image_url":
-                    content.append({"type": "image"})
-                elif p.type == "text" and p.text:
-                    content.append({"type": "text", "text": p.text})
-        else:
-            content = m.content or ""
-        msg_dicts.append({"role": m.role, "content": content})
-    return tokenizer.apply_chat_template(
-        msg_dicts, tokenize=False, add_generation_prompt=True
-    )
-
-
-# ---------------------------------------------------------------------------
-# Prompt builder — uses tokenizer's Jinja template so tools are formatted
-# correctly by the model's own template (Qwen3 knows its tool call format).
-# ---------------------------------------------------------------------------
-def build_prompt(messages: List, tokenizer: AutoTokenizer,
-                 tools: Optional[List[Dict[str, Any]]] = None,
-                 thinking: bool = True) -> str:
-    suffix = " /no_think" if not thinking else ""
-    msg_dicts = []
-    has_system = any(m.role == "system" for m in messages)
-    if not has_system:
-        msg_dicts.append({"role": "system", "content": f"You are a helpful assistant.{suffix}"})
-    for m in messages:
-        text = _text_content(m)
-        d: Dict[str, Any] = {"role": m.role, "content": text}
-        if m.role == "system" and not thinking and not text.endswith("/no_think"):
-            d["content"] = text.rstrip() + suffix
-        if m.tool_call_id:
-            d["tool_call_id"] = m.tool_call_id
-        if m.name:
-            d["name"] = m.name
-        msg_dicts.append(d)
-    return tokenizer.apply_chat_template(
-        msg_dicts,
-        tools=tools,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-
-
-# ---------------------------------------------------------------------------
-# AnythingLLM agent JSON extractor
-# The model may wrap its tool-selection JSON in prose. This scans for the
-# first valid {"name":..., "arguments":...} object and returns it clean.
-# Returns "" when no tool JSON is found so the caller can signal "no tool".
-# ---------------------------------------------------------------------------
-_agent_json_decoder = json.JSONDecoder()
-
-
-def _extract_agent_json(text: str) -> str:
-    pos = 0
-    while pos < len(text):
-        start = text.find('{', pos)
-        if start == -1:
-            break
-        try:
-            obj, _ = _agent_json_decoder.raw_decode(text, start)
-            if isinstance(obj, dict) and "name" in obj and "arguments" in obj:
-                return json.dumps(obj)
-        except json.JSONDecodeError:
-            pass
-        pos = start + 1
-    return ""
-
-
-# ---------------------------------------------------------------------------
-# Tool call parser — extracts <tool_call>…</tool_call> blocks from output
-# ---------------------------------------------------------------------------
-def parse_tool_calls(text: str):
-    pattern = r'<tool_call>\s*(.*?)\s*</tool_call>'
-    matches = re.findall(pattern, text, re.DOTALL)
-    if not matches:
-        return None, text
-    tool_calls = []
-    for m in matches:
-        try:
-            data = json.loads(m)
-            tool_calls.append({
-                "id": f"call_{uuid.uuid4().hex[:8]}",
-                "type": "function",
-                "function": {
-                    "name": data["name"],
-                    "arguments": json.dumps(data.get("arguments", {})),
-                },
-            })
-        except (json.JSONDecodeError, KeyError):
-            log.warning(f"Failed to parse tool_call JSON: {m[:100]}")
-    remaining = re.sub(pattern, '', text, flags=re.DOTALL).strip()
-    return (tool_calls or None), remaining
-
 
 def _record_stats(model_id: str, completion_tokens: int,
                   elapsed: float, tok_per_sec: float) -> None:
@@ -582,53 +477,6 @@ def _record_stats(model_id: str, completion_tokens: int,
 #   - DecodedResults with .texts: List[str]  (newer builds)
 #   - EncodedResults (should not happen when input is str, but guard anyway)
 # ---------------------------------------------------------------------------
-def decode_result(raw) -> str:
-    if isinstance(raw, str):
-        return raw
-    # DecodedResults / GenerationResult with .texts attribute
-    if hasattr(raw, "texts"):
-        texts = raw.texts
-        return texts[0] if texts else ""
-    # Some builds expose .perf_metrics but the text via str()
-    text = str(raw)
-    # str() of DecodedResults sometimes looks like "['actual text']"
-    # strip that wrapper if present
-    if text.startswith("['") and text.endswith("']"):
-        return text[2:-2]
-    return text
-
-
-# ---------------------------------------------------------------------------
-# Thinking block extraction
-# ---------------------------------------------------------------------------
-def extract_thinking(raw_text: str):
-    # Closed think block
-    think_match = re.search(r'<think>(.*?)</think>', raw_text, flags=re.DOTALL)
-    if think_match:
-        thinking = think_match.group(1).strip()
-        answer = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
-        return thinking, answer
-
-    # Unclosed <think> — model hit max_tokens mid-thought; extract what we have
-    # and return the thinking fragment with no answer rather than empty string
-    unclosed = re.search(r'<think>(.*)', raw_text, flags=re.DOTALL)
-    if unclosed:
-        thinking = unclosed.group(1).strip()
-        log.warning(f"Unclosed <think> block — model likely hit max_tokens mid-thought ({len(thinking)} chars)")
-        answer = raw_text[:unclosed.start()].strip()
-        if not answer:
-            answer = "*(thinking was cut off by max_tokens limit)*"
-        return thinking, answer
-
-    return None, raw_text.strip()
-
-
-def format_thinking(thinking: Optional[str], answer: str) -> str:
-    if not thinking:
-        return answer
-    lines = thinking.replace('\n', '\n> ')
-    return f"> 💭 **Thinking...**\n> {lines}\n\n---\n\n{answer}"
-
 
 # ---------------------------------------------------------------------------
 # Real token streamer using openvino_genai callback
@@ -651,52 +499,6 @@ class AsyncTokenStreamer(ov_genai.StreamerBase):
     def end(self):
         self._loop.call_soon_threadsafe(self._queue.put_nowait, None)
 
-
-class ThinkStreamHandler:
-    """Buffer <think> blocks and emit content or reasoning_content based on strategy.
-
-    strategy="suppress"      — fast profile: discard think block entirely.
-    strategy="separate_field" — precise/laborious: emit reasoning_content (Open WebUI compatible).
-    """
-    def __init__(self, strategy: str = "suppress") -> None:
-        self.strategy = strategy
-        self.buf = ""
-        self.in_think = False
-        self.think_acc = ""
-
-    def feed(self, token: str) -> list[dict]:
-        """Return list of delta dicts to emit. May be empty while buffering."""
-        self.buf += token
-        out: list[dict] = []
-        if not self.in_think:
-            if "<think>" in self.buf:
-                before, _, rest = self.buf.partition("<think>")
-                if before.strip():
-                    out.append({"content": before})
-                self.buf, self.in_think, self.think_acc = rest, True, ""
-            else:
-                # Keep last 7 chars buffered — long enough to detect "<think>"
-                safe, self.buf = self.buf[:-7], self.buf[-7:]
-                if safe:
-                    out.append({"content": safe})
-        else:
-            if "</think>" in self.buf:
-                think_raw, _, rest = self.buf.partition("</think>")
-                self.think_acc += think_raw
-                self.buf, self.in_think = rest, False
-                if self.strategy == "separate_field":
-                    out.append({"content": "", "reasoning_content": self.think_acc})
-        return out
-
-    def flush(self) -> list[dict]:
-        """Drain any remaining buffer at end of stream."""
-        return [{"content": self.buf}] if self.buf and not self.in_think else []
-
-
-class StreamingToolCallHandler:
-    """Stub — full streaming tool call support deferred to Phase 3.
-    Currently the buffered agent_stream() path handles all tool calls."""
-    pass
 
 
 # ---------------------------------------------------------------------------
@@ -1457,24 +1259,12 @@ def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
 
 
 # ---------------------------------------------------------------------------
-# Pydantic models
+# Pydantic request/response models  (Message, ContentPart → prompt_builder)
 # ---------------------------------------------------------------------------
-class ContentPart(BaseModel):
-    type: str
-    text: Optional[str] = None
-    image_url: Optional[Dict[str, str]] = None
-
-
-class Message(BaseModel):
-    role: str
-    content: Union[str, List[ContentPart], None] = None
-    tool_call_id: Optional[str] = None
-    name: Optional[str] = None
-
 class ChatRequest(BaseModel):
     model: str = "qwen2.5-3b-int4"
     messages: List[Message]
-    max_tokens: Optional[int] = MAX_NEW_TOKENS_DEFAULT
+    max_tokens: Optional[int] = None
     temperature: Optional[float] = 0.7
     stream: Optional[bool] = False
     thinking: Optional[bool] = True   # False → appends /no_think to system prompt
@@ -1642,7 +1432,7 @@ async def _chat_vlm(req: ChatRequest):
         log.info(f"[DEBUG] VLM prompt ({model_id}, {len(images)} image(s)):\n{prompt[:3000]}")
 
     gen_config = ov_genai.GenerationConfig()
-    gen_config.max_new_tokens = req.max_tokens or MAX_NEW_TOKENS_DEFAULT
+    gen_config.max_new_tokens = req.max_tokens if req.max_tokens is not None else MAX_NEW_TOKENS_DEFAULT
     gen_config.temperature = req.temperature
     gen_config.do_sample = req.temperature > 0
 
@@ -1667,6 +1457,7 @@ async def _chat_vlm(req: ChatRequest):
             await loop.run_in_executor(None, _gen)
 
         chunk_id = uuid.uuid4().hex[:8]
+        _vlm_stats: dict = {}
 
         async def vlm_token_generator():
             gen_task = asyncio.create_task(run_vlm_generation())
@@ -1691,19 +1482,20 @@ async def _chat_vlm(req: ChatRequest):
                 stats.active_requests -= 1
                 elapsed = time.time() - start
                 tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
-                log.info(f"{model_id} [VLM stream]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
+                finish_reason = "length" if completion_tokens >= gen_config.max_new_tokens else "stop"
+                _vlm_stats["finish_reason"] = finish_reason
+                log.info(f"{model_id} [VLM stream]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s | finish={finish_reason}")
                 _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
-
-        finish_chunk = json.dumps({
-            "id": f"chatcmpl-{chunk_id}",
-            "object": "chat.completion.chunk",
-            "model": model_id,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-        })
 
         async def vlm_full_stream():
             async for chunk in vlm_token_generator():
                 yield chunk
+            finish_chunk = json.dumps({
+                "id": f"chatcmpl-{chunk_id}",
+                "object": "chat.completion.chunk",
+                "model": model_id,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": _vlm_stats.get("finish_reason", "stop")}],
+            })
             yield f"data: {finish_chunk}\n\n"
             yield "data: [DONE]\n\n"
 
@@ -1725,7 +1517,8 @@ async def _chat_vlm(req: ChatRequest):
 
         completion_tokens = len(tokenizer.encode(answer or ""))
         tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
-        log.info(f"{model_id} [VLM]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
+        finish_reason = "length" if completion_tokens >= gen_config.max_new_tokens else "stop"
+        log.info(f"{model_id} [VLM]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s | finish={finish_reason}")
         _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
     finally:
         stats.active_requests -= 1
@@ -1734,7 +1527,7 @@ async def _chat_vlm(req: ChatRequest):
         "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
         "object": "chat.completion",
         "model": model_id,
-        "choices": [{"index": 0, "message": message, "finish_reason": "stop"}],
+        "choices": [{"index": 0, "message": message, "finish_reason": finish_reason}],
         "usage": {
             "prompt_tokens":     prompt_tokens,
             "completion_tokens": completion_tokens,
@@ -1886,7 +1679,7 @@ async def chat(req: ChatRequest):
     # agent path caps tokens via MAX_NEW_TOKENS_AGENT (short tool-selection JSON).
     effective_max_tokens = (
         req.max_tokens
-        if req.max_tokens != MAX_NEW_TOKENS_DEFAULT
+        if req.max_tokens is not None
         else (MAX_NEW_TOKENS_AGENT if is_agent else profile_max_tokens)
     )
 
@@ -2046,6 +1839,9 @@ async def chat(req: ChatRequest):
         async def token_generator():
             gen_task = asyncio.create_task(run_generation())
             handler = ThinkStreamHandler(strategy=_think_strategy)
+            # When tools are present buffer the full output — tool calls must be
+            # parsed from the complete text before we can emit the correct delta.
+            _tool_buf: list[str] | None = [] if req.tools else None
             start = time.time()
             yield ": keepalive\n\n"  # byte before prefill resets client TTFT timeout
 
@@ -2053,24 +1849,45 @@ async def chat(req: ChatRequest):
                 while True:
                     token = await queue.get()
                     if token is None:
-                        for delta in handler.flush():
-                            flush_chunk = {
+                        if _tool_buf is not None:
+                            full_text = "".join(_tool_buf)
+                            thinking, answer = extract_thinking(full_text)
+                            tool_calls, answer = parse_tool_calls(answer)
+                            if tool_calls:
+                                delta: dict = {"role": "assistant", "content": None,
+                                               "tool_calls": tool_calls}
+                                _stream_stats["finish_reason"] = "tool_calls"
+                            else:
+                                delta = {"content": format_thinking(thinking, answer)}
+                            buf_chunk = {
                                 "id": f"chatcmpl-{chunk_id}",
                                 "object": "chat.completion.chunk",
                                 "model": model_id,
                                 "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
                             }
-                            yield f"data: {json.dumps(flush_chunk)}\n\n"
+                            yield f"data: {json.dumps(buf_chunk)}\n\n"
+                        else:
+                            for delta in handler.flush():
+                                flush_chunk = {
+                                    "id": f"chatcmpl-{chunk_id}",
+                                    "object": "chat.completion.chunk",
+                                    "model": model_id,
+                                    "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                                }
+                                yield f"data: {json.dumps(flush_chunk)}\n\n"
                         break
                     _stream_stats["completion_tokens"] += 1
-                    for delta in handler.feed(token):
-                        chunk = {
-                            "id": f"chatcmpl-{chunk_id}",
-                            "object": "chat.completion.chunk",
-                            "model": model_id,
-                            "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
-                        }
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                    if _tool_buf is not None:
+                        _tool_buf.append(token)
+                    else:
+                        for delta in handler.feed(token):
+                            chunk = {
+                                "id": f"chatcmpl-{chunk_id}",
+                                "object": "chat.completion.chunk",
+                                "model": model_id,
+                                "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                            }
+                            yield f"data: {json.dumps(chunk)}\n\n"
             finally:
                 await gen_task
                 lock.release()
@@ -2078,7 +1895,11 @@ async def chat(req: ChatRequest):
                 elapsed = time.time() - start
                 ct = _stream_stats["completion_tokens"]
                 tok_per_sec = ct / elapsed if elapsed > 0 else 0
-                log.info(f"{model_id} [stream]: {ct} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
+                finish_reason = _stream_stats.get("finish_reason") or (
+                    "length" if ct >= effective_max_tokens else "stop"
+                )
+                _stream_stats["finish_reason"] = finish_reason
+                log.info(f"{model_id} [stream]: {ct} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s | finish={finish_reason}")
                 _record_stats(model_id, ct, elapsed, tok_per_sec)
                 db.write_inference_event(
                     request_id=_request_id_var.get(), profile=_active_profile,
@@ -2088,7 +1909,7 @@ async def chat(req: ChatRequest):
                     prompt_tokens=prompt_tokens, completion_tokens=ct,
                     tok_per_sec=round(tok_per_sec, 2), elapsed_sec=round(elapsed, 2),
                     query_embedding=_route_query_embedding,
-                    meta={"stream": True, "finish_reason": "stop"},
+                    meta={"stream": True, "finish_reason": finish_reason},
                 )
 
         async def full_stream():
@@ -2099,7 +1920,7 @@ async def chat(req: ChatRequest):
                 "id": f"chatcmpl-{chunk_id}",
                 "object": "chat.completion.chunk",
                 "model": model_id,
-                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "choices": [{"index": 0, "delta": {}, "finish_reason": _stream_stats.get("finish_reason", "stop")}],
                 "usage": {
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": ct,
@@ -2126,6 +1947,7 @@ async def chat(req: ChatRequest):
         thinking, answer = extract_thinking(raw_text)
         tool_calls, answer = parse_tool_calls(answer)
 
+        completion_tokens = len(tokenizer.encode(answer or ""))
         if tool_calls:
             if DEFAULT_MODEL and DEFAULT_MODEL != model_id:
                 asyncio.create_task(_warm_model(DEFAULT_MODEL))
@@ -2133,9 +1955,7 @@ async def chat(req: ChatRequest):
             finish_reason = "tool_calls"
         else:
             message = {"role": "assistant", "content": format_thinking(thinking, answer)}
-            finish_reason = "stop"
-
-        completion_tokens = len(tokenizer.encode(answer or ""))
+            finish_reason = "length" if completion_tokens >= effective_max_tokens else "stop"
         tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
         log.info(f"{req.model}: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s | finish={finish_reason}")
         _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
