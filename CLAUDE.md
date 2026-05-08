@@ -11,6 +11,8 @@
 **Bootstrap guard — check before anything else:**
 - `PROGRESS.md` missing → create with empty NOW section, continue.
 - `SCRATCHPAD.md` missing → create it empty, continue.
+- `SESSION.md` missing → create empty, continue.
+- `SESSION.md` **non-empty** → **BROKEN SESSION DETECTED.** Read it aloud to user, ask "Continue from this state?" before proceeding.
 
 **Normal re-entry — in this order:**
 1. Read `PROGRESS.md` — **NOW section only** (skip history).
@@ -154,14 +156,34 @@ Format: bullet points, max 5 lines per topic, no prose. Cleared at start of ever
 
 ---
 
+## SESSION.md — broken-session recovery
+
+Live crash snapshot. Overwritten on every commit during a session; cleared (emptied to zero bytes) by `#session-wrap`.
+
+**Format:**
+```
+## BROKEN SESSION — <YYYY-MM-DD HH:MM>
+
+**Last commit:** <hash> — <message>
+**Mid-step:** <what was in progress — one sentence>
+**Next action:** <exact file + function>
+**Tests:** <pass N/N | fail — N failing | not run>
+**Notes:** <anything else needed to resume cleanly>
+```
+
+On re-entry: if non-empty, read aloud and ask user before proceeding (bootstrap guard handles this).
+
+---
+
 ## `#session-wrap`
 
 1. Run tests if available.
 2. Copy current NOW block verbatim into `PROGRESS.md` History (append as `### YYYY-MM-DD — Session N (<hash>)`), then overwrite NOW with updated fields including **Tests** result.
 3. Append to `DECISIONS.md` — one entry per architectural decision made this session.
 4. Clear `SCRATCHPAD.md`, write one-paragraph session summary.
-5. Commit: `docs: session wrap — <summary>`.
-6. Report: committed files, what NOW says, what next session opens first.
+5. Clear `SESSION.md` (write empty file — signals clean close).
+6. Commit: `docs: session wrap — <summary>`.
+7. Report: committed files, what NOW says, what next session opens first.
 
 ---
 
@@ -212,6 +234,7 @@ Format: bullet points, max 5 lines per topic, no prose. Cleared at start of ever
 | `PROGRESS.md` | Build progress — read NOW section only on re-entry |
 | `DECISIONS.md` | Append-only architectural decisions log |
 | `SCRATCHPAD.md` | In-session working memory |
+| `SESSION.md` | Crash-recovery snapshot — empty = clean close; non-empty = broken session |
 | `CLAUDE-ref.md` | Reference detail (Tool-Call Gap, Qwen format) — load only on explicit request |
 | `CLAUDE-changes.md` | Audit log of every change made to this file |
 
