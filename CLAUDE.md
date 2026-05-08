@@ -244,9 +244,9 @@ On re-entry: if non-empty, read aloud and ask user before proceeding (bootstrap 
 | `SESSION.md` | Crash-recovery snapshot — empty = clean close; non-empty = broken session |
 | `CLAUDE-ref.md` | Reference detail (Tool-Call Gap, Qwen format) — load only on explicit request |
 | `CLAUDE-changes.md` | Audit log of every change made to this file |
-| `~/autotest/YYYYMMdd_<hash>.md` | PND recovery artifacts — live test and debug session logs |
-| `~/plans/YYYYMMdd_PLAN_<subject>.md` | Development plans — all plans live here, not in repo |
-| `~/plans/YYYYMMdd_<subject>.sql` | SQL attachments referenced by plans |
+| `autotest/YYYYMMdd_<hash>.md` | PND recovery artifacts — live test and debug session logs |
+| `plans/YYYYMMdd_PLAN_<subject>.md` | Development plans — all plans live here, inside the repo |
+| `plans/YYYYMMdd_<subject>.sql` | SQL attachments referenced by plans |
 
 ---
 
