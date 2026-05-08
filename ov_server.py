@@ -1522,6 +1522,8 @@ async def chat(req: ChatRequest):
 
     # ── Routing ─────────────────────────────────────────────────────────────
     active_profile_cfg = _cfg.get("profiles", {}).get(_active_profile, {})
+    _route_t0 = time.perf_counter()
+    _route_confidence: float | None = None
 
     if req.model not in ROUTING_TRIGGER_MODELS and req.model in AVAILABLE_MODELS:
         # Explicit local model — bypass routing
@@ -1541,6 +1543,7 @@ async def chat(req: ChatRequest):
                 (_text_content(m) for m in reversed(req.messages) if m.role == "user"), ""
             )
             task_class, score = await loop.run_in_executor(None, _route_by_embedding, last_user_msg)
+            _route_confidence = round(score, 4)
             if score >= threshold:
                 strategy = "embedding"
             else:
@@ -1563,6 +1566,8 @@ async def chat(req: ChatRequest):
                 if ovh_spec:
                     spec = dict(ovh_spec, model=model_id)
             if spec:
+                routing_decision["confidence"] = _route_confidence
+                routing_decision["latency_ms"] = round((time.perf_counter() - _route_t0) * 1000)
                 _last_routing_decision = routing_decision
                 return await _proxy_chat(req, spec)
             log.warning(f"[router] no backend for OVH model '{model_id}' — local fallback")
@@ -1570,6 +1575,8 @@ async def chat(req: ChatRequest):
             routing_decision["model"] = model_id
             routing_decision["strategy"] += "+local_fallback"
 
+    routing_decision["confidence"] = _route_confidence
+    routing_decision["latency_ms"] = round((time.perf_counter() - _route_t0) * 1000)
     _last_routing_decision = routing_decision
 
     # ── Profile behavioral settings ─────────────────────────────────────────
