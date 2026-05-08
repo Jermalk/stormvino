@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 import json
 import httpx
 import numpy as np
+import db
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -165,7 +166,7 @@ _KNOWN_CONFIG_KEYS: frozenset[str] = frozenset({
     "vlm_max_image_side_px", "enable_prefix_caching", "max_num_batched_tokens",
     # routing
     "provider_scope", "active_profile", "providers", "assessor", "router",
-    "profiles", "task_classes",
+    "profiles", "task_classes", "postgres_dsn",
     # legacy compat — tolerated without warning until Step 2.4
     "default_model", "agent_model", "max_new_tokens_agent", "routing",
 })
@@ -727,7 +728,7 @@ def vram_free_gb() -> Optional[float]:
     return _TOTAL_VRAM_GB - sum(_vram_allocated.values())
 
 
-def _evict_lru() -> None:
+def _evict_lru() -> str:
     lru = min(loaded_models, key=lambda k: model_last_used.get(k, 0))
     log.info(f"Evicting LRU model '{lru}' to free VRAM")
     del loaded_models[lru]
@@ -735,6 +736,7 @@ def _evict_lru() -> None:
     model_last_used.pop(lru, None)
     _vram_allocated.pop(lru, None)
     gc.collect()
+    return lru
 
 
 # ---------------------------------------------------------------------------
@@ -755,7 +757,10 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
 
         # Hard cap: evict LRU until under the model limit
         while len(loaded_models) >= MAX_LOADED_MODELS:
-            _evict_lru()
+            evicted = _evict_lru()
+            db.write_model_load_event(event_type="evict", model_id=evicted,
+                kv_cache_gb=None, vram_before_gb=None, vram_after_gb=vram_free_gb(),
+                elapsed_sec=None, meta={"reason": "hard_cap"})
 
         # Soft cap: evict LRU until VRAM headroom is satisfied (re-query after each eviction).
         # Include KV cache in size estimate — OpenVINO allocates weights + KV together.
@@ -765,7 +770,10 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
         if free is not None:
             while free - size < VRAM_HEADROOM_GB and loaded_models:
                 log.info(f"VRAM free={free:.1f}GB, model+KV={size:.1f}GB, headroom={VRAM_HEADROOM_GB}GB — evicting LRU")
-                _evict_lru()
+                evicted = _evict_lru()
+                db.write_model_load_event(event_type="evict", model_id=evicted,
+                    kv_cache_gb=None, vram_before_gb=free, vram_after_gb=vram_free_gb(),
+                    elapsed_sec=None, meta={"reason": "vram_headroom"})
                 free = vram_free_gb()
         else:
             log.debug("VRAM query unavailable — relying on model count limit only")
@@ -861,6 +869,13 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
         free_after = vram_free_gb()
         log.info(f"Loaded {model_id} | VRAM allocated: {_vram_allocated[model_id]:.1f}GB"
                  + (f", free: {free_after:.1f}GB" if free_after is not None else ""))
+        _t_load_end = time.time()
+        db.write_model_load_event(
+            event_type="load", model_id=model_id,
+            kv_cache_gb=kv_gb, vram_before_gb=free,
+            vram_after_gb=free_after, elapsed_sec=None,
+            meta={"weights_gb": round(weights_gb, 2)},
+        )
     return loaded_models[model_id]
 
 
@@ -1236,6 +1251,13 @@ async def _load_embedding_centroids() -> None:
         centroids = await loop.run_in_executor(None, _compute_task_class_centroids, model, tok)
         _task_class_embeddings = centroids
         log.info(f"[router] centroids ready for: {list(centroids.keys())}")
+        cfg_classes = _cfg.get("task_classes", {})
+        for tc, vec in centroids.items():
+            examples = cfg_classes.get(tc, {}).get("examples", [])
+            db.write_centroid_snapshot(
+                commit=_GIT_COMMIT, task_class=tc,
+                centroid=vec.tolist(), example_count=len(examples),
+            )
     except Exception as exc:
         log.warning(f"[router] centroid computation failed ({exc}) — Stage 2 routing disabled")
         _task_class_embeddings = {}
@@ -1300,11 +1322,11 @@ async def _load_assessor() -> None:
 
 
 
-def _route_by_embedding(query: str) -> "tuple[str, float]":
-    """Return (task_class, cosine_similarity) for the best-matching task class.
-    Returns ('general', 0.0) when embeddings are unavailable."""
+def _route_by_embedding(query: str) -> "tuple[str, float, list[float] | None]":
+    """Return (task_class, cosine_similarity, embedding_vector) for the best-matching task class.
+    Returns ('general', 0.0, None) when embeddings are unavailable."""
     if not _task_class_embeddings:
-        return ("general", 0.0)
+        return ("general", 0.0, None)
 
     inputs = emb_tokenizer(
         [query[:2048]],  # ~512-token char budget
@@ -1320,7 +1342,7 @@ def _route_by_embedding(query: str) -> "tuple[str, float]":
         score = float(np.dot(vec, centroid))
         if score > best_score:
             best_class, best_score = task_class, score
-    return (best_class, best_score)
+    return (best_class, best_score, vec.tolist())
 
 
 # ---------------------------------------------------------------------------
@@ -1448,11 +1470,48 @@ class ScopeRequest(BaseModel):
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def _startup_preload() -> None:
+    await db.init_pool(_cfg.get("postgres_dsn"))
+    await db.prune_old_events(days=30)
     await _load_embedding_centroids()           # blocking — centroids before assessor
     asyncio.create_task(_load_assessor())       # background — assessor pipeline
+    asyncio.create_task(_system_snapshot_loop())
     if AGENT_MODEL:
         log.info(f"Scheduling startup preload of agent model '{AGENT_MODEL}'")
         asyncio.create_task(_warm_model(AGENT_MODEL))
+
+
+@app.on_event("shutdown")
+async def _shutdown() -> None:
+    await db.close_pool()
+
+
+async def _system_snapshot_loop() -> None:
+    """Write a system_snapshot row every 60 seconds while server is running."""
+    while True:
+        await asyncio.sleep(60)
+        try:
+            ram = psutil.virtual_memory()
+            free = vram_free_gb()
+            db.write_system_snapshot(
+                vram_used_gb=round(_TOTAL_VRAM_GB - free, 2) if (_TOTAL_VRAM_GB and free) else None,
+                vram_total_gb=round(_TOTAL_VRAM_GB, 2) if _TOTAL_VRAM_GB else None,
+                ram_used_pct=ram.percent,
+                loaded_models=list(loaded_models.keys()),
+                active_requests=stats.active_requests,
+                meta={},
+            )
+        except Exception as exc:
+            log.debug(f"system_snapshot_loop error: {exc}")
+
+
+@app.get("/metrics/events")
+async def metrics_events(limit: int = 100, since: float | None = None):
+    return await db.query_events(limit=limit, since=since)
+
+
+@app.get("/metrics/summary")
+async def metrics_summary():
+    return await db.query_summary()
 
 
 @app.get("/health")
@@ -1727,6 +1786,9 @@ async def chat(req: ChatRequest):
     active_profile_cfg = _cfg.get("profiles", {}).get(_active_profile, {})
     _route_t0 = time.perf_counter()
     _route_confidence: float | None = None
+    _route_task_class: str | None = None
+    _route_strategy: str | None = None
+    _route_query_embedding: list | None = None
 
     if req.model not in ROUTING_TRIGGER_MODELS and req.model in AVAILABLE_MODELS:
         # Explicit local model — bypass routing
@@ -1744,10 +1806,13 @@ async def chat(req: ChatRequest):
             last_user_msg = next(
                 (_text_content(m) for m in reversed(req.messages) if m.role == "user"), ""
             )
-            task_class, score = await loop.run_in_executor(None, _route_by_embedding, last_user_msg)
+            task_class, score, emb_vec = await loop.run_in_executor(None, _route_by_embedding, last_user_msg)
             _route_confidence = round(score, 4)
+            _route_query_embedding = emb_vec
             strategy = "embedding"
 
+        _route_task_class = task_class
+        _route_strategy = strategy
         cplx = complexity_score(req)
         model_entry = _select_model(task_class, active_profile_cfg, cplx)
         model_id = model_entry["id"]
@@ -1854,6 +1919,16 @@ async def chat(req: ChatRequest):
                     f" = {tok_per_sec:.1f} tok/s"
                 )
                 _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
+                db.write_inference_event(
+                    request_id=_request_id_var.get(), profile=_active_profile,
+                    model_requested=req.model, task_class=_route_task_class,
+                    strategy=_route_strategy, confidence=_route_confidence,
+                    model_selected=model_id, provider="loc",
+                    prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+                    tok_per_sec=round(tok_per_sec, 2), elapsed_sec=round(elapsed, 2),
+                    query_embedding=_route_query_embedding,
+                    meta={"agent": True, "finish_reason": finish_reason},
+                )
 
                 if tool_calls:
                     # Speculatively start loading the summarisation model while
@@ -1959,6 +2034,16 @@ async def chat(req: ChatRequest):
                 tok_per_sec = ct / elapsed if elapsed > 0 else 0
                 log.info(f"{model_id} [stream]: {ct} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
                 _record_stats(model_id, ct, elapsed, tok_per_sec)
+                db.write_inference_event(
+                    request_id=_request_id_var.get(), profile=_active_profile,
+                    model_requested=req.model, task_class=_route_task_class,
+                    strategy=_route_strategy, confidence=_route_confidence,
+                    model_selected=model_id, provider="loc",
+                    prompt_tokens=prompt_tokens, completion_tokens=ct,
+                    tok_per_sec=round(tok_per_sec, 2), elapsed_sec=round(elapsed, 2),
+                    query_embedding=_route_query_embedding,
+                    meta={"stream": True},
+                )
 
         async def full_stream():
             async for chunk in token_generator():
@@ -2008,6 +2093,16 @@ async def chat(req: ChatRequest):
         tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
         log.info(f"{req.model}: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s | finish={finish_reason}")
         _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
+        db.write_inference_event(
+            request_id=_request_id_var.get(), profile=_active_profile,
+            model_requested=req.model, task_class=_route_task_class,
+            strategy=_route_strategy, confidence=_route_confidence,
+            model_selected=model_id, provider="loc",
+            prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+            tok_per_sec=round(tok_per_sec, 2), elapsed_sec=round(elapsed, 2),
+            query_embedding=_route_query_embedding,
+            meta={"thinking": bool(thinking), "finish_reason": finish_reason},
+        )
     finally:
         stats.active_requests -= 1
 

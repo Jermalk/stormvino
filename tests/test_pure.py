@@ -1362,11 +1362,13 @@ class TestRouteByEmbedding:
 
     def test_empty_embeddings_returns_general(self):
         with patch.object(ov_server, "_task_class_embeddings", {}):
-            assert _route_by_embedding("hello") == ("general", 0.0)
+            cls, score, vec = _route_by_embedding("hello")
+            assert cls == "general" and score == 0.0 and vec is None
 
     def test_none_embeddings_returns_general(self):
         with patch.object(ov_server, "_task_class_embeddings", None):
-            assert _route_by_embedding("hello") == ("general", 0.0)
+            cls, score, vec = _route_by_embedding("hello")
+            assert cls == "general" and score == 0.0 and vec is None
 
     def test_returns_class_with_highest_cosine(self):
         embeddings = {
@@ -1376,7 +1378,7 @@ class TestRouteByEmbedding:
         }
         self._query_vec = np.array([1.0, 0.0, 0.0, 0.0])
         with self._patches(embeddings):
-            cls, score = _route_by_embedding("some query")
+            cls, score, vec = _route_by_embedding("some query")
         assert cls == "code"
         assert abs(score - 1.0) < 1e-5
 
@@ -1385,7 +1387,7 @@ class TestRouteByEmbedding:
         embeddings = {"general": np.array([1.0, 0.0, 0.0, 0.0])}
         self._query_vec = v
         with self._patches(embeddings):
-            _, score = _route_by_embedding("q")
+            _, score, _ = _route_by_embedding("q")
         assert abs(score - 1 / np.sqrt(2)) < 1e-5
 
     def test_returns_tuple_of_str_and_float(self):
@@ -1393,9 +1395,10 @@ class TestRouteByEmbedding:
         self._query_vec = np.array([1.0, 0.0, 0.0, 0.0])
         with self._patches(embeddings):
             result = _route_by_embedding("q")
-        assert isinstance(result, tuple)
+        assert isinstance(result, tuple) and len(result) == 3
         assert isinstance(result[0], str)
         assert isinstance(result[1], float)
+        assert isinstance(result[2], list)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
