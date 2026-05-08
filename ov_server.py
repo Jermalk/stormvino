@@ -1055,6 +1055,13 @@ class ProfileRequest(BaseModel):
     profile: str
 
 
+_VALID_SCOPES = {"local", "local+ovh", "all"}
+
+
+class ScopeRequest(BaseModel):
+    scope: str
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -1090,6 +1097,7 @@ async def health():
         "active_profile":    _active_profile,
         "profile_switching": _profile_switching,
         "routing_backend":   _cfg.get("routing", {}).get("default", "local"),
+        "provider_scope":    _cfg.get("provider_scope", "local"),
     }
 
 
@@ -1105,6 +1113,18 @@ async def set_profile(req: ProfileRequest):
         raise HTTPException(status_code=409, detail="Profile switch already in progress")
     asyncio.create_task(_apply_profile(req.profile))
     return JSONResponse(status_code=202, content={"accepted": True, "profile": req.profile})
+
+
+@app.post("/admin/scope")
+async def set_scope(req: ScopeRequest) -> JSONResponse:
+    if req.scope not in _VALID_SCOPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid scope '{req.scope}'. Valid values: {sorted(_VALID_SCOPES)}",
+        )
+    _cfg["provider_scope"] = req.scope
+    _catalogue_cache.clear()
+    return JSONResponse(status_code=200, content={"scope": req.scope})
 
 
 @app.get("/v1/models")

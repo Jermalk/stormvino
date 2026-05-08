@@ -16,6 +16,7 @@ import ov_server
 from ov_server import (
     ContentPart,
     Message,
+    _VALID_SCOPES,
     _build_catalogue,
     _catalogue_cache,
     _discover_models,
@@ -1065,3 +1066,63 @@ class TestListModels:
         ):
             await ov_server.list_models()
         mock_refresh.assert_awaited_once_with("local")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# POST /admin/scope — set_scope()
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.anyio
+class TestSetScope:
+    def setup_method(self):
+        ov_server._catalogue_cache.clear()
+        ov_server._cfg["provider_scope"] = "local"
+
+    def teardown_method(self):
+        ov_server._cfg["provider_scope"] = "local"
+        ov_server._catalogue_cache.clear()
+
+    async def test_valid_scope_returns_200(self):
+        for scope in _VALID_SCOPES:
+            req = ov_server.ScopeRequest(scope=scope)
+            resp = await ov_server.set_scope(req)
+            assert resp.status_code == 200
+
+    async def test_response_body_contains_new_scope(self):
+        import json
+        req = ov_server.ScopeRequest(scope="local+ovh")
+        resp = await ov_server.set_scope(req)
+        body = json.loads(resp.body)
+        assert body["scope"] == "local+ovh"
+
+    async def test_cfg_updated(self):
+        req = ov_server.ScopeRequest(scope="local+ovh")
+        await ov_server.set_scope(req)
+        assert ov_server._cfg["provider_scope"] == "local+ovh"
+
+    async def test_cache_cleared_on_scope_change(self):
+        ov_server._catalogue_cache["ovh"] = ([], time.time())
+        req = ov_server.ScopeRequest(scope="local+ovh")
+        await ov_server.set_scope(req)
+        assert "ovh" not in ov_server._catalogue_cache
+
+    async def test_invalid_scope_raises_400(self):
+        from fastapi import HTTPException
+        req = ov_server.ScopeRequest(scope="bogus")
+        with pytest.raises(HTTPException) as exc_info:
+            await ov_server.set_scope(req)
+        assert exc_info.value.status_code == 400
+
+    async def test_invalid_scope_error_mentions_valid_values(self):
+        from fastapi import HTTPException
+        req = ov_server.ScopeRequest(scope="remote-only")
+        with pytest.raises(HTTPException) as exc_info:
+            await ov_server.set_scope(req)
+        assert "local" in exc_info.value.detail
+
+    async def test_all_three_valid_scopes_accepted(self):
+        for scope in ("local", "local+ovh", "all"):
+            req = ov_server.ScopeRequest(scope=scope)
+            resp = await ov_server.set_scope(req)
+            assert resp.status_code == 200
+            assert ov_server._cfg["provider_scope"] == scope

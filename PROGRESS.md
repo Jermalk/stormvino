@@ -187,9 +187,9 @@
 
 ## NOW
 
-**Working on:** Phase 1 Step 1.3 complete — extended GET /v1/models using catalogue
+**Working on:** Phase 1 Step 1.4 complete — POST /admin/scope + provider_scope in /health
 **Last commit:** (pending)
-**Next action:** PLAN_routing.md Phase 1 Step 1.4 — POST /admin/scope
+**Next action:** PLAN_routing.md Phase 1 Step 1.5 — provider_scope in ov-monitor (keyboard shortcut s)
 **Blocked on:** nothing
 **Open questions:** (1) Embedding threshold 0.72 — tune after Phase 2 live. (2) OVH TTL 300s. (3) STT queued, lower priority.
-**Tests:** pass (120/120) — `make test`
+**Tests:** pass (127/127) — `make test`
