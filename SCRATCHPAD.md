@@ -3,24 +3,20 @@
 > Cleared at start of every session. Carry-over summary written as first entry.
 > Format: bullet points, max 5 lines per topic, no prose.
 
-## Session 22 — architecture restored (2026-05-08)
+## Session 22 wrap — stable architecture (2026-05-08)
 
-Root cause of the diagnose loop: SCRATCHPAD carried stale "qwen3-8b broken" note from before
-f31cf3f fixed the KV mismatch. We incorrectly promoted qwen3-14b as assessor. Reverted.
+Session fixed two config bugs: (1) missing `default_model` caused 30B preload after tool_calls,
+(2) assessor 2GB KV blob was unstable — raised to 6GB (uses cached blob from get_model path).
+qwen3-14b dropped permanently from routing — IR incompatible with OV 2026.1.0. System now clean.
 
 ## Current model lineup
-- Assessor: qwen3-8b-int4-ov (2GB KV) — 105 t/s, pipe reused for fast-tier general/web_search
-- General/web_search best: qwen3-14b-int4-ov (6GB KV)
-- Code fast: qwen2.5-coder-14b-int4 (6GB KV)
+- Assessor: qwen3-8b-int4-ov (6GB KV) — loads in ~4.5s from blob, pipe reused for fast-tier tasks
+- Code fast: qwen2.5-coder-14b-int4 (6GB KV) — preloaded at startup (default_model + agent_model)
 - Vision: qwen2.5-vl-7b-int4-ov
 - Embeddings: multilingual-e5-large-int8
-- OVH best: Qwen3-32B / Qwen3-Coder-480B-A35B
+- OVH best: Qwen3-32B (general/web_search/document), Qwen3-Coder-480B-A35B (code)
+- qwen3-14b: ON DISK but broken (IR incompatible with OV 2026.1.0 + u8 KV precision) — needs re-download
 
-## On disk but not in any task_class (safe to ignore)
-- qwen3-8b-int4-ov-bak — old self-converted copy; original (qwen3-8b-int4-ov) is OK
-- qwen3-30b-a3b-int4-ov, -bak — permanently dropped from local
-- qwen3-coder-30b-a3b-int4-ov — OFFICIAL, not scheduled for local use
-
-## First startup after this session
-- assessor 2GB KV blob not cached → recompile ~5-10 min; server will log "[assessor] loading..."
-- If OOM on coder-14b with 6GB KV, reduce kv_cache_size_gb to 5
+## Postgres observability
+- NULL task_class/strategy/confidence is EXPECTED for explicit-model requests
+- Router only fires (and records) when routing trigger model names are used (e.g. claude-sonnet-4-6)

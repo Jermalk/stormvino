@@ -215,11 +215,21 @@
 
 ---
 
+### 2026-05-08 — Session 22 (03b85f9)
+**Working on:** Fix 30B speculative preload (default_model unset), fix assessor 2GB KV blob instability, restore qwen3-8b assessor architecture.
+**Last commit:** 03b85f9 — fix: set default_model/agent_model to coder-14b, raise assessor KV to 6GB
+**Next action:** Download fresh qwen3-14b-int4-ov from HuggingFace (IR incompatible with OV 2026.1.0 — old blob deleted). Until then, 14b is absent from routing.
+**Blocked on:** nothing
+**Open questions:** qwen3-14b needs fresh download — existing directory has IR incompatible with OV 2026.1.0 + KV_CACHE_PRECISION:u8.
+**Tests:** pass (176/176)
+
+---
+
 ## NOW
 
-**Working on:** Restored correct assessor architecture: qwen3-8b (2GB KV), task models at 6GB KV, 30B local dropped permanently.
-**Last commit:** a525376 — fix: restore qwen3-8b assessor, raise task KV to 6GB, drop 30B local
-**Next action:** Restart server — assessor will recompile 2GB KV blob (~5-10 min first startup). Verify `assessor_loaded: true` in /health. Then test chat routing.
+**Working on:** System stable — all fixes from today's session committed.
+**Last commit:** 03b85f9 — fix: set default_model/agent_model to coder-14b, raise assessor KV to 6GB
+**Next action:** Fresh download of qwen3-14b-int4-ov when ready (see MODELS.md for conversion guide). Or start STT Phase 1 (see FUTURE_PLAN.md).
 **Blocked on:** nothing
-**Open questions:** If 6GB task KV causes OOM on coder-14b, drop to 5GB (retry logic already in code via a04cb8b).
+**Open questions:** (1) qwen3-14b IR incompatible — needs re-download from HuggingFace. (2) STT Phase 1 still queued. (3) Embedding threshold 0.72 needs live tuning.
 **Tests:** pass (176/176)

@@ -285,3 +285,11 @@
 **Rationale:** SCRATCHPAD "qwen3-8b broken" was stale — the KV mismatch was already fixed in f31cf3f. qwen3-8b at 105 t/s is the right assessor (DECISIONS 2026-05-07). Without 30B models: assessor 7.5GB + task-14b 13.7GB = 21.2GB, 3.3GB headroom — fits cleanly. 6GB KV gives 14b models ~20k token context vs 4GB's ~13k.
 **Rejected alternative:** qwen3-14b as assessor — overkill for routing (~7s vs ~1s), blocks 6GB KV for task models.
 **Affects:** config.json assessor block, kv_cache_size_gb, all task_classes
+
+---
+
+### 2026-05-08 — default_model/agent_model set to coder-14b; assessor KV raised to 6GB
+**Decision:** Set `default_model` and `agent_model` to `qwen2.5-coder-14b-int4` in config.json. Raise `assessor.kv_cache_size_gb` from 2 to 6.
+**Rationale:** Without `default_model`, `DEFAULT_MODEL` fell back to alphabetically last model (`qwen3-coder-30b`) causing 30B load as speculative preload after every `tool_calls` response. Assessor 2GB KV blob was unstable (fresh compile occasionally fails); 6GB KV uses the same blob compiled by `get_model()` and is reliably cached.
+**Rejected alternative:** Keep 2GB assessor KV — unreliable blob compilation causes intermittent startup failures.
+**Affects:** config.json `default_model`, `agent_model`, `assessor.kv_cache_size_gb`
