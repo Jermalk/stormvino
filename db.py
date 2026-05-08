@@ -271,15 +271,15 @@ async def prune_old_events(days: int = 30) -> None:
     if _pool is None:
         return
     try:
-        from datetime import timedelta
-        cutoff = timedelta(days=days)
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         async with _pool.acquire() as conn:
             r1 = await conn.execute(
-                "DELETE FROM inference_events WHERE ts < now() - $1",
+                "DELETE FROM inference_events WHERE ts < $1",
                 cutoff,
             )
             r2 = await conn.execute(
-                "DELETE FROM system_snapshots WHERE ts < now() - $1",
+                "DELETE FROM system_snapshots WHERE ts < $1",
                 cutoff,
             )
         log.info(f"DB pruned: {r1}, {r2}")
