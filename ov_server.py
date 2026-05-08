@@ -273,6 +273,7 @@ loaded_tokenizers: Dict[str, AutoTokenizer] = {}
 model_last_used: Dict[str, float] = {}
 emb_model = None
 emb_tokenizer = None
+_task_class_embeddings: "dict[str, np.ndarray] | None" = None  # None=not loaded, {}=failed
 _model_lock = asyncio.Lock()           # serialises model load/evict
 _infer_locks: Dict[str, asyncio.Lock] = {}  # one per model — prevents concurrent generate()
 _emb_lock = asyncio.Lock()
@@ -1066,6 +1067,68 @@ def _detect_signal(req: "ChatRequest") -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Embedding similarity router — Stage 2 routing
+# ---------------------------------------------------------------------------
+
+def _compute_task_class_centroids(model, tok) -> "dict[str, np.ndarray]":
+    """Compute L2-normalised centroid embedding for each task class.
+    Uses description + optional 'examples' list from config."""
+    centroids: dict[str, np.ndarray] = {}
+    for name, cls_cfg in _cfg.get("task_classes", {}).items():
+        texts = []
+        desc = cls_cfg.get("description", "")
+        if desc:
+            texts.append(desc)
+        texts.extend(cls_cfg.get("examples", []))
+        if not texts:
+            continue
+        inputs = tok(texts, return_tensors="pt", padding=True, truncation=True, max_length=512)
+        outputs = model(**inputs)
+        vecs = outputs.last_hidden_state.mean(dim=1).detach().numpy()
+        centroid = vecs.mean(axis=0)
+        norm = np.linalg.norm(centroid)
+        centroids[name] = centroid / max(norm, 1e-9)
+    return centroids
+
+
+async def _load_embedding_centroids() -> None:
+    """Blocking startup step: load embedding model and compute task class centroids."""
+    global _task_class_embeddings
+    try:
+        model, tok = await get_embedding_model()
+        loop = asyncio.get_running_loop()
+        centroids = await loop.run_in_executor(None, _compute_task_class_centroids, model, tok)
+        _task_class_embeddings = centroids
+        log.info(f"[router] centroids ready for: {list(centroids.keys())}")
+    except Exception as exc:
+        log.warning(f"[router] centroid computation failed ({exc}) — Stage 2 routing disabled")
+        _task_class_embeddings = {}
+
+
+def _route_by_embedding(query: str) -> "tuple[str, float]":
+    """Return (task_class, cosine_similarity) for the best-matching task class.
+    Returns ('general', 0.0) when embeddings are unavailable."""
+    if not _task_class_embeddings:
+        return ("general", 0.0)
+
+    inputs = emb_tokenizer(
+        [query[:2048]],  # ~512-token char budget
+        return_tensors="pt", padding=True, truncation=True, max_length=512,
+    )
+    outputs = emb_model(**inputs)
+    vec = outputs.last_hidden_state.mean(dim=1).detach().numpy()[0]
+    norm = np.linalg.norm(vec)
+    vec = vec / max(norm, 1e-9)
+
+    best_class, best_score = "general", 0.0
+    for task_class, centroid in _task_class_embeddings.items():
+        score = float(np.dot(vec, centroid))
+        if score > best_score:
+            best_class, best_score = task_class, score
+    return (best_class, best_score)
+
+
+# ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
 class ContentPart(BaseModel):
@@ -1109,6 +1172,7 @@ class ScopeRequest(BaseModel):
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def _startup_preload() -> None:
+    await _load_embedding_centroids()
     if AGENT_MODEL:
         log.info(f"Scheduling startup preload of agent model '{AGENT_MODEL}'")
         asyncio.create_task(_warm_model(AGENT_MODEL))

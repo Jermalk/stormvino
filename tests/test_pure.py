@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import numpy as np
+
 import pytest
 
 import ov_server
@@ -18,7 +20,9 @@ from ov_server import (
     Message,
     _VALID_SCOPES,
     _build_catalogue,
+    _compute_task_class_centroids,
     _detect_signal,
+    _route_by_embedding,
     _catalogue_cache,
     _discover_models,
     _discover_vlm_models,
@@ -1235,3 +1239,157 @@ class TestDetectSignal:
         msgs = [_user("word " * 80), _assistant("word " * 80), _user("word " * 80)]
         with patch.dict(ov_server._cfg, {"router": {"long_context_tokens": 50, "keywords": {}}}):
             assert _detect_signal(_make_req(msgs)) == "document"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _compute_task_class_centroids / _route_by_embedding
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _FakeHiddenState:
+    """Mimics model output.last_hidden_state for test purposes."""
+    def __init__(self, arr: np.ndarray):
+        self._arr = arr          # shape [batch, hidden]
+
+    def mean(self, dim):
+        return self
+
+    def detach(self):
+        return self
+
+    def numpy(self):
+        return self._arr
+
+
+def _fake_model(vecs_by_text: dict[str, np.ndarray]):
+    """Return a callable model that maps tokenised inputs → fake embeddings.
+    vecs_by_text maps text → embedding vector. For batches, uses index order."""
+    _calls = []
+
+    class _Model:
+        def __call__(self, **kwargs):
+            idx = len(_calls)
+            _calls.append(idx)
+            # Return stacked array matching batch size derived from input_ids shape
+            batch = list(vecs_by_text.values())
+            arr = np.array(batch[:kwargs.get("input_ids", [[]] * 1).shape[0]
+                                  if hasattr(kwargs.get("input_ids"), "shape") else 1])
+            if arr.ndim == 1:
+                arr = arr[np.newaxis, :]
+            return type("Out", (), {"last_hidden_state": _FakeHiddenState(arr)})()
+
+    return _Model()
+
+
+def _fake_tokenizer(texts_order: list[str] | None = None):
+    """Minimal tokenizer mock — returns a dict with a fake input_ids tensor."""
+    class _FakeTensor:
+        def __init__(self, batch):
+            self.shape = (batch, 10)
+
+    class _Tok:
+        def __call__(self, texts, **kwargs):
+            batch = len(texts) if isinstance(texts, list) else 1
+            return {"input_ids": _FakeTensor(batch)}
+
+    return _Tok()
+
+
+_TC_FIXTURE = {
+    "general":    {"description": "General conversation", "models": []},
+    "code":       {"description": "Code tasks", "models": []},
+    "vision":     {"description": "Image understanding", "models": []},
+}
+
+
+class TestComputeTaskClassCentroids:
+    def _run(self, task_classes, vecs):
+        dim = len(next(iter(vecs.values())))
+        call_idx = [0]
+
+        class _Model:
+            def __call__(self_, **kwargs):
+                batch = kwargs["input_ids"].shape[0]
+                arr = np.array([list(vecs.values())[call_idx[0] % len(vecs)]] * batch)
+                call_idx[0] += batch
+                return type("O", (), {"last_hidden_state": _FakeHiddenState(arr)})()
+
+        with patch.dict(ov_server._cfg, {"task_classes": task_classes}):
+            result = _compute_task_class_centroids(_Model(), _fake_tokenizer())
+        return result
+
+    def test_returns_dict_keyed_by_task_class(self):
+        result = self._run(_TC_FIXTURE, {k: np.ones(4) for k in _TC_FIXTURE})
+        assert set(result.keys()) == set(_TC_FIXTURE.keys())
+
+    def test_centroid_is_l2_normalised(self):
+        result = self._run(_TC_FIXTURE, {k: np.array([3.0, 4.0, 0.0, 0.0]) for k in _TC_FIXTURE})
+        for name, vec in result.items():
+            assert abs(np.linalg.norm(vec) - 1.0) < 1e-5, f"{name} not normalised"
+
+    def test_task_class_with_no_text_skipped(self):
+        tc = {"empty": {"models": []}, "full": {"description": "Has text", "models": []}}
+        result = self._run(tc, {"full": np.ones(4)})
+        assert "empty" not in result
+        assert "full" in result
+
+    def test_examples_included_in_centroid(self):
+        tc = {"code": {"description": "coding", "examples": ["write a function", "debug"], "models": []}}
+        result = self._run(tc, {"code": np.ones(4)})
+        assert "code" in result
+
+
+class TestRouteByEmbedding:
+    def setup_method(self):
+        self._query_vec = np.array([1.0, 0.0, 0.0, 0.0])
+
+        class _QModel:
+            def __call__(self_, **kwargs):
+                arr = np.array([self._query_vec])
+                return type("O", (), {"last_hidden_state": _FakeHiddenState(arr)})()
+
+        self._mock_model = _QModel()
+
+    def _patches(self, embeddings):
+        from contextlib import ExitStack
+        stack = ExitStack()
+        stack.enter_context(patch.object(ov_server, "_task_class_embeddings", embeddings))
+        stack.enter_context(patch.object(ov_server, "emb_model", self._mock_model))
+        stack.enter_context(patch.object(ov_server, "emb_tokenizer", _fake_tokenizer()))
+        return stack
+
+    def test_empty_embeddings_returns_general(self):
+        with patch.object(ov_server, "_task_class_embeddings", {}):
+            assert _route_by_embedding("hello") == ("general", 0.0)
+
+    def test_none_embeddings_returns_general(self):
+        with patch.object(ov_server, "_task_class_embeddings", None):
+            assert _route_by_embedding("hello") == ("general", 0.0)
+
+    def test_returns_class_with_highest_cosine(self):
+        embeddings = {
+            "general": np.array([0.0, 1.0, 0.0, 0.0]),
+            "code":    np.array([1.0, 0.0, 0.0, 0.0]),
+            "vision":  np.array([0.0, 0.0, 1.0, 0.0]),
+        }
+        self._query_vec = np.array([1.0, 0.0, 0.0, 0.0])
+        with self._patches(embeddings):
+            cls, score = _route_by_embedding("some query")
+        assert cls == "code"
+        assert abs(score - 1.0) < 1e-5
+
+    def test_score_is_cosine_similarity(self):
+        v = np.array([1.0, 1.0, 0.0, 0.0]) / np.sqrt(2)
+        embeddings = {"general": np.array([1.0, 0.0, 0.0, 0.0])}
+        self._query_vec = v
+        with self._patches(embeddings):
+            _, score = _route_by_embedding("q")
+        assert abs(score - 1 / np.sqrt(2)) < 1e-5
+
+    def test_returns_tuple_of_str_and_float(self):
+        embeddings = {"general": np.array([1.0, 0.0, 0.0, 0.0])}
+        self._query_vec = np.array([1.0, 0.0, 0.0, 0.0])
+        with self._patches(embeddings):
+            result = _route_by_embedding("q")
+        assert isinstance(result, tuple)
+        assert isinstance(result[0], str)
+        assert isinstance(result[1], float)
