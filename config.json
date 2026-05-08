@@ -108,9 +108,9 @@
         "code": {
             "description": "Write, debug, explain, or refactor code",
             "models": [
-                { "id": "qwen3-8b-int4-ov",         "provider": "loc", "tier": "fast" },
-                { "id": "qwen2.5-coder-14b-int4",   "provider": "loc", "tier": "best" },
-                { "id": "Qwen3-Coder-480B-A35B",    "provider": "ovh", "tier": "best" }
+                { "id": "qwen2.5-coder-14b-int4",        "provider": "loc", "tier": "fast" },
+                { "id": "qwen3-coder-30b-a3b-int4-ov",   "provider": "loc", "tier": "best" },
+                { "id": "Qwen3-Coder-480B-A35B",          "provider": "ovh", "tier": "best" }
             ]
         },
         "general": {
