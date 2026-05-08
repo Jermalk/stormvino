@@ -152,7 +152,7 @@ Format: bullet points, max 5 lines per topic, no prose. Cleared at start of ever
 
 ## Hard Rules
 
-- **Never use `sudo pip install`.** All dependencies live in the venv at `/ov_server/venv`.
+- **Never use `sudo pip install`.** All dependencies live in the venv at `/home/jerzy/ov_env`.
 - **PEP8 compliant Python.** Use `black` if available.
 - **Type hints on all function signatures.**
 - **No bare `except:`.** Catch specific exceptions.
@@ -170,7 +170,7 @@ Format: bullet points, max 5 lines per topic, no prose. Cleared at start of ever
 ## Diagnostic Protocol
 
 1. **Snapshot** — `hostnamectl`, `python3 --version`, check venv active, `lscpu | grep "Model name"`.
-2. **Logs** — `journalctl -u ov_server` or process stdout. Read the traceback before hypothesising.
+2. **Logs** — `journalctl -u ov-server` or process stdout. Read the traceback before hypothesising.
 3. **Hypothesis** — State explicitly what is wrong and why.
 4. **Targeted fix** — Minimal change that resolves the root cause.
 5. **Verification** — `curl -s http://localhost:11435/health | python3 -m json.tool`; follow with a minimal chat request.
