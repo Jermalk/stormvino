@@ -1109,15 +1109,9 @@ async def set_profile(req: ProfileRequest):
 
 @app.get("/v1/models")
 async def list_models():
-    llms = [
-        {"id": mid, "object": "model", "capabilities": {"function_calling": True}}
-        for mid in AVAILABLE_MODELS
-    ]
-    vlms = [
-        {"id": mid, "object": "model", "capabilities": {"vision": True}}
-        for mid in AVAILABLE_VLM_MODELS
-    ]
-    return {"object": "list", "data": llms + vlms}
+    scope = _cfg.get("provider_scope", "local")
+    await _refresh_catalogue(scope)
+    return {"object": "list", "data": _build_catalogue(scope)}
 
 
 async def _chat_vlm(req: ChatRequest):

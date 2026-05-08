@@ -934,3 +934,134 @@ class TestFetchOvhCatalogue:
             result = await _fetch_ovh_catalogue(spec)
         assert result[0]["tier"] == "best"
         ov_server._catalogue_cache.pop("ovh", None)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# GET /v1/models — list_models()
+# ──────────────────────────────────────────────────────────────────────────────
+
+_REQUIRED_MODEL_FIELDS = {"id", "object", "provider", "tier", "context_length", "pricing", "loaded"}
+
+_LOCAL_CFG = {"provider_scope": "local", "task_classes": {}}
+_EMPTY_MODELS = dict(
+    AVAILABLE_MODELS={},
+    AVAILABLE_VLM_MODELS={},
+    loaded_models={},
+    loaded_vlm_models={},
+)
+
+
+def _patch_models(**overrides):
+    patches = {**_EMPTY_MODELS, **overrides}
+    return [patch.object(ov_server, k, v) for k, v in patches.items()]
+
+
+@pytest.mark.anyio
+class TestListModels:
+    def setup_method(self):
+        ov_server._catalogue_cache.pop("ovh", None)
+
+    async def test_returns_object_list_shape(self):
+        mock_refresh = AsyncMock()
+        with (
+            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
+            patch.object(ov_server, "AVAILABLE_MODELS", {"m1": "/p"}),
+            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(ov_server, "loaded_models", {}),
+            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.dict(ov_server._cfg, _LOCAL_CFG),
+        ):
+            resp = await ov_server.list_models()
+        assert resp["object"] == "list"
+        assert isinstance(resp["data"], list)
+
+    async def test_each_entry_has_required_fields(self):
+        mock_refresh = AsyncMock()
+        with (
+            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
+            patch.object(ov_server, "AVAILABLE_MODELS", {"m1": "/p"}),
+            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(ov_server, "loaded_models", {}),
+            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.dict(ov_server._cfg, _LOCAL_CFG),
+        ):
+            resp = await ov_server.list_models()
+        assert resp["data"], "expected at least one entry"
+        for entry in resp["data"]:
+            assert _REQUIRED_MODEL_FIELDS <= entry.keys(), f"Missing fields in {entry}"
+
+    async def test_scope_read_from_cfg(self):
+        mock_refresh = AsyncMock()
+        with (
+            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
+            patch.object(ov_server, "AVAILABLE_MODELS", {}),
+            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(ov_server, "loaded_models", {}),
+            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.dict(ov_server._cfg, {"provider_scope": "local+ovh", "task_classes": {}}),
+        ):
+            await ov_server.list_models()
+        mock_refresh.assert_awaited_once_with("local+ovh")
+
+    async def test_local_scope_excludes_ovh_cache(self):
+        ovh_entry = {"id": "cloud-m", "object": "model", "provider": "ovh",
+                     "tier": "best", "context_length": None, "pricing": None, "loaded": False}
+        ov_server._catalogue_cache["ovh"] = ([ovh_entry], time.time())
+        mock_refresh = AsyncMock()
+        with (
+            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
+            patch.object(ov_server, "AVAILABLE_MODELS", {}),
+            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(ov_server, "loaded_models", {}),
+            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.dict(ov_server._cfg, _LOCAL_CFG),
+        ):
+            resp = await ov_server.list_models()
+        assert not any(e["provider"] == "ovh" for e in resp["data"])
+
+    async def test_local_plus_ovh_scope_includes_ovh_entries(self):
+        ovh_entry = {"id": "cloud-m", "object": "model", "provider": "ovh",
+                     "tier": "best", "context_length": None, "pricing": None, "loaded": False}
+        ov_server._catalogue_cache["ovh"] = ([ovh_entry], time.time())
+        mock_refresh = AsyncMock()
+        with (
+            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
+            patch.object(ov_server, "AVAILABLE_MODELS", {}),
+            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(ov_server, "loaded_models", {}),
+            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.dict(ov_server._cfg, {"provider_scope": "local+ovh", "task_classes": {}}),
+        ):
+            resp = await ov_server.list_models()
+        ids = [e["id"] for e in resp["data"]]
+        assert "cloud-m" in ids
+        assert any(e["provider"] == "ovh" for e in resp["data"])
+
+    async def test_loaded_flag_reflects_loaded_models(self):
+        mock_refresh = AsyncMock()
+        with (
+            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
+            patch.object(ov_server, "AVAILABLE_MODELS", {"hot": "/p", "cold": "/q"}),
+            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(ov_server, "loaded_models", {"hot": object()}),
+            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.dict(ov_server._cfg, _LOCAL_CFG),
+        ):
+            resp = await ov_server.list_models()
+        by_id = {e["id"]: e for e in resp["data"]}
+        assert by_id["hot"]["loaded"] is True
+        assert by_id["cold"]["loaded"] is False
+
+    async def test_default_scope_is_local_when_cfg_missing(self):
+        mock_refresh = AsyncMock()
+        cfg_without_scope = {k: v for k, v in ov_server._cfg.items() if k != "provider_scope"}
+        with (
+            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
+            patch.object(ov_server, "AVAILABLE_MODELS", {}),
+            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(ov_server, "loaded_models", {}),
+            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.object(ov_server, "_cfg", cfg_without_scope),
+        ):
+            await ov_server.list_models()
+        mock_refresh.assert_awaited_once_with("local")

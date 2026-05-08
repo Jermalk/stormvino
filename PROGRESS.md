@@ -187,9 +187,9 @@
 
 ## NOW
 
-**Working on:** Phase 1 Steps 1.1–1.2 complete
-**Last commit:** ac94d64 — feat: Step 1.2 — _build_catalogue, _fetch_ovh_catalogue, _scope_includes
-**Next action:** PLAN_routing.md Phase 1 Step 1.3 — extended `GET /v1/models` using catalogue
+**Working on:** Phase 1 Step 1.3 complete — extended GET /v1/models using catalogue
+**Last commit:** (pending)
+**Next action:** PLAN_routing.md Phase 1 Step 1.4 — POST /admin/scope
 **Blocked on:** nothing
 **Open questions:** (1) Embedding threshold 0.72 — tune after Phase 2 live. (2) OVH TTL 300s. (3) STT queued, lower priority.
-**Tests:** pass (113/113) — `make test`
+**Tests:** pass (120/120) — `make test`
