@@ -36,7 +36,12 @@
 
     "assessor": {
         "model":          "qwen3-8b-int4-ov",
-        "kv_cache_size_gb": 4
+        "kv_cache_size_gb": 1
+    },
+
+    "model_kv_overrides": {
+        "qwen3-coder-30b-a3b-int4-ov": 2,
+        "qwen3-30b-a3b-int4-ov":       2
     },
 
     "router": {

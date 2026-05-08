@@ -239,9 +239,15 @@ CONFIG             = {
     "KV_CACHE_PRECISION":              "u8",
     "DYNAMIC_QUANTIZATION_GROUP_SIZE": "32",
 }
-def get_scheduler_config() -> ov_genai.SchedulerConfig:
+def _model_kv_gb(model_id: str) -> int:
+    """Return KV cache size (GB) for model_id, checking model_kv_overrides first."""
+    overrides = _cfg.get("model_kv_overrides", {})
+    return int(overrides.get(model_id, _cfg.get("kv_cache_size_gb", 8)))
+
+
+def get_scheduler_config(kv_override: int | None = None) -> ov_genai.SchedulerConfig:
     sched = ov_genai.SchedulerConfig()
-    sched.cache_size = _cfg.get("kv_cache_size_gb", 8)
+    sched.cache_size = kv_override if kv_override is not None else _cfg.get("kv_cache_size_gb", 8)
     sched.enable_prefix_caching = _cfg.get("enable_prefix_caching", True)
     sched.max_num_batched_tokens = _cfg.get("max_num_batched_tokens", 4096)
     return sched
@@ -764,7 +770,7 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
 
         # Soft cap: evict LRU until VRAM headroom is satisfied (re-query after each eviction).
         # Include KV cache in size estimate — OpenVINO allocates weights + KV together.
-        kv_gb = _cfg.get("kv_cache_size_gb", 8)
+        kv_gb = _model_kv_gb(model_id)
         size  = model_size_gb(model_id) + kv_gb
         free  = vram_free_gb()
         if free is not None:
@@ -786,7 +792,7 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
             return await loop.run_in_executor(
                 None,
                 partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
-                        scheduler_config=get_scheduler_config(), **CONFIG)
+                        scheduler_config=get_scheduler_config(kv_gb), **CONFIG)
             )
 
         try:
@@ -805,7 +811,7 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
                         raise HTTPException(status_code=500, detail=str(e2))
                 else:
                     # Nothing left to evict — retry with halved KV cache
-                    kv_reduced = max(1, _cfg.get("kv_cache_size_gb", 4) // 2)
+                    kv_reduced = max(1, kv_gb // 2)
                     log.warning(
                         f"VRAM OOM loading {model_id} (nothing to evict) — "
                         f"retrying with kv_cache={kv_reduced}GB"
@@ -834,7 +840,7 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
                 )
                 async def _do_load_no_prefix() -> ov_genai.LLMPipeline:
                     sched = ov_genai.SchedulerConfig()
-                    sched.cache_size = _cfg.get("kv_cache_size_gb", 8)
+                    sched.cache_size = kv_gb
                     sched.enable_prefix_caching = False
                     sched.max_num_batched_tokens = _cfg.get("max_num_batched_tokens", 4096)
                     _loop = asyncio.get_running_loop()
