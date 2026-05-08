@@ -1914,7 +1914,7 @@ async def chat(req: ChatRequest):
     # Agent responses are short JSON (≤ ~100 tokens) so buffering is safe.
     # Streaming raw tokens would expose <think> blocks to clients like AnythingLLM
     # that parse the content as JSON and break on unexpected text.
-    if req.stream and is_agent:
+    if req.stream and bool(req.tools):
         chunk_id = uuid.uuid4().hex[:8]
         loop = asyncio.get_running_loop()
 
