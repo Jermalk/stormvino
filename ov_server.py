@@ -768,14 +768,38 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
         except Exception as e:
             err_str = str(e)
             # OpenVINO KV-cache OOM: evict LRU and retry once.
-            if "size_in_bytes <= total_mem_size" in err_str and loaded_models:
-                log.warning(f"VRAM OOM loading {model_id} — evicting LRU and retrying")
-                _evict_lru()
-                try:
-                    pipe = await _do_load()
-                except Exception as e2:
-                    log.error(f"Failed to load {model_id} after eviction: {e2}")
-                    raise HTTPException(status_code=500, detail=str(e2))
+            if "size_in_bytes <= total_mem_size" in err_str:
+                if loaded_models:
+                    log.warning(f"VRAM OOM loading {model_id} — evicting LRU and retrying")
+                    _evict_lru()
+                    try:
+                        pipe = await _do_load()
+                    except Exception as e2:
+                        log.error(f"Failed to load {model_id} after eviction: {e2}")
+                        raise HTTPException(status_code=500, detail=str(e2))
+                else:
+                    # Nothing left to evict — retry with halved KV cache
+                    kv_reduced = max(1, _cfg.get("kv_cache_size_gb", 4) // 2)
+                    log.warning(
+                        f"VRAM OOM loading {model_id} (nothing to evict) — "
+                        f"retrying with kv_cache={kv_reduced}GB"
+                    )
+                    async def _do_load_reduced_kv() -> ov_genai.LLMPipeline:
+                        sched = ov_genai.SchedulerConfig()
+                        sched.cache_size = kv_reduced
+                        sched.enable_prefix_caching = _cfg.get("enable_prefix_caching", True)
+                        sched.max_num_batched_tokens = _cfg.get("max_num_batched_tokens", 4096)
+                        _loop = asyncio.get_running_loop()
+                        return await _loop.run_in_executor(
+                            None,
+                            partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
+                                    scheduler_config=sched, **CONFIG)
+                        )
+                    try:
+                        pipe = await _do_load_reduced_kv()
+                    except Exception as e2:
+                        log.error(f"Failed to load {model_id} with reduced KV ({kv_reduced}GB): {e2}")
+                        raise HTTPException(status_code=500, detail=str(e2))
             elif "m_element_type.is_static()" in err_str:
                 # Stale OV compiled-model cache or prefix-caching incompatibility.
                 # Retry once with prefix caching disabled.

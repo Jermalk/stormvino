@@ -11,7 +11,7 @@
     },
 
     "max_loaded_models":      1,
-    "kv_cache_size_gb":       6,
+    "kv_cache_size_gb":       4,
     "vram_headroom_gb":       1.5,
     "max_ram_percent":        75.0,
     "max_new_tokens_default": 2048,
