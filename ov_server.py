@@ -161,7 +161,7 @@ def _load_config() -> dict:
 _KNOWN_CONFIG_KEYS: frozenset[str] = frozenset({
     # hardware
     "models_dir", "device", "ov_cache_dir", "embedding_model", "vision_model",
-    "model_aliases", "max_loaded_models", "kv_cache_size_gb", "vram_headroom_gb",
+    "model_aliases", "max_loaded_models", "kv_cache_size_gb", "model_kv_overrides", "vram_headroom_gb",
     "max_ram_percent", "max_new_tokens_default", "vlm_max_image_turns",
     "vlm_max_image_side_px", "enable_prefix_caching", "max_num_batched_tokens",
     # routing
