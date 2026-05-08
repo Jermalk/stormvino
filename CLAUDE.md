@@ -33,6 +33,7 @@ If task is clear from steps 1–3, start coding. If not, ask — do not explore 
 | AEC | Always Embrace Change | Evaluate rule spirit vs letter — break consciously when cost > benefit |
 | OMK | Overconfidence May Kill | Step back mid-implementation — what else could this break? |
 | YNC | You're Not Chrome | Surface irreversible actions; Jerzy decides, Claude executes |
+| PND | Post-Nuke Discovery | Create a log file first; write each finding as it's made |
 
 **KYE — Know Your Enemy** *(Sun Tzu)*
 The "enemy" is the problem, the codebase, the constraint, or the bug. Understand it before fighting it. Never hypothesise before reconnaissance. Firing condition: before writing any code, read the relevant files, logs, and constraints first. A wrong mental model costs more than the time spent reading.
@@ -48,6 +49,9 @@ Tunnel vision on a target stops you seeing the board. The chess beginner loses n
 
 **YNC — You're Not Chrome**
 Claude is a powerful assistant but not the decision-maker. Responsibility stays with Jerzy. Propose architecture and approaches; surface irreversible actions before taking them; never unilaterally decide on design tradeoffs. If uncertain whether an action is reversible, ask. This is not timidity — it is correct role definition.
+
+**PND — Post-Nuke Discovery**
+The session is not the unit of work — the log is. During any multi-step discovery, debugging, or live-testing session, create a dedicated log file *before* starting and write each significant finding to it immediately after it's confirmed. This makes the log the recovery artifact: if context compacts or the session is interrupted, the next session reads the log first and resumes without re-running discovery from scratch. Firing condition: any investigation expected to span >5 steps or >15 minutes. Format: `~/autotest/YYYYMMdd_<commitHash>.md` for live tests; free-form file in `/tmp/` for ad-hoc debugging. The log must be self-contained — a cold reader with no session history must be able to resume from it.
 
 ---
 
@@ -240,6 +244,7 @@ On re-entry: if non-empty, read aloud and ask user before proceeding (bootstrap 
 | `SESSION.md` | Crash-recovery snapshot — empty = clean close; non-empty = broken session |
 | `CLAUDE-ref.md` | Reference detail (Tool-Call Gap, Qwen format) — load only on explicit request |
 | `CLAUDE-changes.md` | Audit log of every change made to this file |
+| `~/autotest/YYYYMMdd_<hash>.md` | PND recovery artifacts — live test and debug session logs |
 
 ---
 

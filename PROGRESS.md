@@ -207,9 +207,9 @@
 
 ## NOW
 
-**Working on:** Phase 3 complete — assessor wired in routing pipeline
-**Last commit:** 01bc6bd — feat: Step 3.3 — wire assessor into routing pipeline
-**Next action:** Phase 4 Step 4.1 — task graph executor (`_execute_task_graph`) in ov_server.py; OR live-test routing on running server first
+**Working on:** Live routing validation — server running, autotest framework set up
+**Last commit:** 79e3ed9 — fix: OV prefix-cache retry, assessor scheduler, vision centroid
+**Next action:** Run live routing tests, record results in ~/autotest/20260508_79e3ed9.md
 **Blocked on:** nothing
 **Open questions:** (1) Embedding threshold 0.72 — tune after live test. (2) Assessor JSON output quality — needs real-traffic validation. (3) STT queued.
 **Tests:** pass (186/186)

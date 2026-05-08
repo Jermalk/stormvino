@@ -1157,11 +1157,18 @@ def _detect_signal(req: "ChatRequest") -> str | None:
 # Embedding similarity router — Stage 2 routing
 # ---------------------------------------------------------------------------
 
+_SIGNAL_ONLY_CLASSES: frozenset[str] = frozenset({"has_image", "has_tools"})
+
+
 def _compute_task_class_centroids(model, tok) -> "dict[str, np.ndarray]":
     """Compute L2-normalised centroid embedding for each task class.
-    Uses description + optional 'examples' list from config."""
+    Uses description + optional 'examples' list from config.
+    Skips task classes with binary signals (has_image, has_tools) — those are
+    handled exclusively by _detect_signal() and must not appear as embedding targets."""
     centroids: dict[str, np.ndarray] = {}
     for name, cls_cfg in _cfg.get("task_classes", {}).items():
+        if cls_cfg.get("signal") in _SIGNAL_ONLY_CLASSES:
+            continue
         texts = []
         desc = cls_cfg.get("description", "")
         if desc:
