@@ -1196,10 +1196,11 @@ def _detect_signal(req: "ChatRequest") -> str | None:
     if req.tools:
         return "web_search"
 
-    # 3. long context — char/4 token estimate across all messages
+    # 3. long context — char/4 token estimate across user+assistant only (exclude system
+    #    prompt — AnythingLLM @agent system prompts are huge and would always trip this)
     router_cfg = _cfg.get("router", {})
     threshold = router_cfg.get("long_context_tokens", 4000)
-    total_tokens = sum(len(_text_content(m)) for m in req.messages) // 4
+    total_tokens = sum(len(_text_content(m)) for m in req.messages if m.role != "system") // 4
     if total_tokens > threshold:
         return "document"
 
