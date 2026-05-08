@@ -1288,7 +1288,7 @@ async def _load_assessor() -> None:
     kv_gb = assessor_cfg.get("kv_cache_size_gb", 2)
     sched = ov_genai.SchedulerConfig()
     sched.cache_size = kv_gb
-    sched.enable_prefix_caching = False   # routing queries are short/unique; prefix cache adds OOM risk
+    sched.enable_prefix_caching = _cfg.get("enable_prefix_caching", True)
     sched.max_num_batched_tokens = _cfg.get("max_num_batched_tokens", 4096)
 
     weights_gb = model_size_gb(model_id)
