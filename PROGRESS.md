@@ -187,9 +187,9 @@
 
 ## NOW
 
-**Working on:** Phase 1 Step 1.4 complete — POST /admin/scope + provider_scope in /health
+**Working on:** Phase 1 complete — all steps 1.1–1.5 done
 **Last commit:** (pending)
-**Next action:** PLAN_routing.md Phase 1 Step 1.5 — provider_scope in ov-monitor (keyboard shortcut s)
+**Next action:** PLAN_routing.md Phase 2 Step 2.1 — _detect_signal()
 **Blocked on:** nothing
 **Open questions:** (1) Embedding threshold 0.72 — tune after Phase 2 live. (2) OVH TTL 300s. (3) STT queued, lower priority.
 **Tests:** pass (127/127) — `make test`

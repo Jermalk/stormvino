@@ -1094,10 +1094,11 @@ async def health():
         "vram_allocated_gb": {k: round(v, 2) for k, v in _vram_allocated.items()},
         "vram_free_gb":      round(vram_free_gb(), 2) if vram_free_gb() is not None else None,
         "kv_cache_size_gb":  _cfg.get("kv_cache_size_gb", 8),
-        "active_profile":    _active_profile,
-        "profile_switching": _profile_switching,
-        "routing_backend":   _cfg.get("routing", {}).get("default", "local"),
-        "provider_scope":    _cfg.get("provider_scope", "local"),
+        "active_profile":        _active_profile,
+        "profile_switching":     _profile_switching,
+        "routing_backend":       _cfg.get("routing", {}).get("default", "local"),
+        "provider_scope":        _cfg.get("provider_scope", "local"),
+        "last_routing_decision": None,
     }
 
 
