@@ -167,7 +167,7 @@ def _load_config() -> dict:
 
 _KNOWN_CONFIG_KEYS: frozenset[str] = frozenset({
     # hardware
-    "models_dir", "device", "ov_cache_dir", "embedding_model", "embedding_device", "vision_model",
+    "models_dir", "device", "ov_cache_dir", "embedding_model", "embedding_device", "vision_model", "vision_device",
     "model_aliases", "max_loaded_models", "kv_cache_size_gb", "model_kv_overrides", "vram_headroom_gb",
     "max_ram_percent", "max_new_tokens_default", "vlm_max_image_turns",
     "vlm_max_image_side_px", "enable_prefix_caching", "max_num_batched_tokens",
@@ -396,6 +396,13 @@ def _decode_image(url: str) -> Image.Image:
     else:
         with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310
             img = Image.open(io.BytesIO(resp.read())).convert("RGB")
+    # Qwen2.5-VL uses 28×28 patches — images smaller than one tile crash the encoder.
+    MIN_SIDE = 28
+    if img.width < MIN_SIDE or img.height < MIN_SIDE:
+        new_w = max(img.width, MIN_SIDE)
+        new_h = max(img.height, MIN_SIDE)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+        log.debug(f"Image upscaled to minimum patch size: {new_w}×{new_h}")
     # Resize so the longest side ≤ VLM_MAX_IMAGE_SIDE_PX to bound KV-cache growth.
     # Qwen2.5-VL uses 28×28 patches: a 1280px side → ~2090 tokens vs ~6760 for 2560px.
     max_side = VLM_MAX_IMAGE_SIDE_PX
@@ -744,12 +751,13 @@ async def get_vlm(model_id: str) -> Tuple[ov_genai.VLMPipeline, AutoTokenizer]:
                 _evict_lru()
                 free = vram_free_gb()
 
-        log.info(f"Loading VLM {model_id} (~{size:.1f}GB)...")
+        vlm_device = _cfg.get("vision_device", DEVICE)
+        log.info(f"Loading VLM {model_id} (~{size:.1f}GB) on {vlm_device}...")
         try:
             loop = asyncio.get_running_loop()
             pipe = await loop.run_in_executor(
                 None,
-                partial(ov_genai.VLMPipeline, AVAILABLE_VLM_MODELS[model_id], DEVICE, **CONFIG)
+                partial(ov_genai.VLMPipeline, AVAILABLE_VLM_MODELS[model_id], vlm_device, **CONFIG)
             )
             tokenizer = await loop.run_in_executor(
                 None,
@@ -1481,7 +1489,12 @@ async def _chat_vlm(req: ChatRequest):
 
         async def run_vlm_generation():
             def _gen():
-                pipe.generate(prompt, images=images, generation_config=gen_config, streamer=streamer)
+                try:
+                    pipe.generate(prompt, images=images, generation_config=gen_config, streamer=streamer)
+                except Exception:
+                    # Guarantee the consumer unblocks even when generate() throws
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
+                    raise
             await loop.run_in_executor(None, _gen)
 
         chunk_id = uuid.uuid4().hex[:8]
@@ -1505,7 +1518,10 @@ async def _chat_vlm(req: ChatRequest):
                     }
                     yield f"data: {json.dumps(chunk)}\n\n"
             finally:
-                await gen_task
+                try:
+                    await gen_task
+                except Exception as exc:
+                    log.error(f"[VLM] generation failed: {exc}")
                 lock.release()
                 stats.active_requests -= 1
                 elapsed = time.time() - start
