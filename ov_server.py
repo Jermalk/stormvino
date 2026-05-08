@@ -261,6 +261,7 @@ def _pick(key: str, fallback_index: int) -> str:
 
 DEFAULT_MODEL = _pick("default_model", -1)   # last (usually largest)
 AGENT_MODEL   = _pick("agent_model",    0)   # first (usually smallest)
+ROUTING_TRIGGER_MODELS: frozenset[str] = frozenset({"auto", ""})
 
 # Embedding model — not auto-discovered (loaded via different code path)
 _emb_name          = _cfg.get("embedding_model", "")
@@ -321,6 +322,7 @@ stats = ServerStats()
 _active_profile: str = _cfg.get("active_profile", "fast")
 _profile_switching: bool = False
 _profile_lock = asyncio.Lock()
+_last_routing_decision: dict | None = None
 
 COMPLEXITY_SIGNALS: tuple[str, ...] = (
     "analyze", "compare", "explain in detail", "evaluate", "critique",
@@ -1296,7 +1298,7 @@ async def health():
         "profile_switching":     _profile_switching,
         "routing_backend":       _cfg.get("routing", {}).get("default", "local"),
         "provider_scope":        _cfg.get("provider_scope", "local"),
-        "last_routing_decision": None,
+        "last_routing_decision": _last_routing_decision,
     }
 
 
@@ -1508,27 +1510,80 @@ async def _proxy_chat(req: ChatRequest, spec: dict) -> Union[StreamingResponse, 
 
 @app.post("/v1/chat/completions")
 async def chat(req: ChatRequest):
+    global _last_routing_decision
     if _has_images(req.messages):
         return await _chat_vlm(req)
 
-    backend_name = _pick_backend_name(req.model)
-    if backend_name != "local":
-        spec = _cfg.get("routing", {}).get("backends", {}).get(backend_name)
-        if spec:
-            return await _proxy_chat(req, spec)
-        log.warning(f"Backend '{backend_name}' not in config — falling back to local")
+    loop = asyncio.get_running_loop()
 
-    # Detect tool-selection calls — either via OpenAI tools param or
-    # AnythingLLM's system-prompt style ("picks the most optimal function").
+    # Detect AnythingLLM-style agent calls (system-prompt keyword, no req.tools)
     _sys = next((_text_content(m) for m in req.messages if m.role == "system"), "")
     is_agent = bool(req.tools) or "picks the most optimal function" in _sys
 
-    # Tool-selection calls use the smaller/faster model and skip thinking —
-    # the model only needs to output a short JSON, not reason at length.
-    effective_model = AGENT_MODEL if is_agent else req.model
-    effective_thinking = req.thinking and not is_agent
+    # ── Routing ─────────────────────────────────────────────────────────────
+    active_profile_cfg = _cfg.get("profiles", {}).get(_active_profile, {})
 
-    pipe = await get_model(effective_model)
+    if req.model not in ROUTING_TRIGGER_MODELS and req.model in AVAILABLE_MODELS:
+        # Explicit local model — bypass routing
+        model_id = req.model
+        routing_decision: dict = {"strategy": "explicit", "task_class": None, "model": model_id}
+    else:
+        # Stage 1: rule-based signal detection
+        task_class = _detect_signal(req)
+        strategy = "rule"
+        if task_class is None and is_agent:
+            # AnythingLLM system-prompt tool selection — route to fast tool-capable model
+            task_class = "web_search"
+        elif task_class is None:
+            # Stage 2: embedding similarity
+            threshold = _cfg.get("router", {}).get("embedding_threshold", 0.72)
+            last_user_msg = next(
+                (_text_content(m) for m in reversed(req.messages) if m.role == "user"), ""
+            )
+            task_class, score = await loop.run_in_executor(None, _route_by_embedding, last_user_msg)
+            if score >= threshold:
+                strategy = "embedding"
+            else:
+                task_class = "general"
+                strategy = "general_fallback"
+
+        cplx = complexity_score(req)
+        model_entry = _select_model(task_class, active_profile_cfg, cplx)
+        model_id = model_entry["id"]
+        routing_decision = {"task_class": task_class, "model": model_id, "strategy": strategy}
+        log.info(f"[router] {strategy} → task_class='{task_class}' model='{model_id}'")
+
+        # OVH model selected — find matching proxy backend and forward
+        if model_entry.get("provider") != "loc":
+            backends = _cfg.get("routing", {}).get("backends", {})
+            spec = next((s for s in backends.values() if s.get("model") == model_id), None)
+            if spec is None:
+                provider = model_entry.get("provider", "")
+                ovh_spec = backends.get(provider)
+                if ovh_spec:
+                    spec = dict(ovh_spec, model=model_id)
+            if spec:
+                _last_routing_decision = routing_decision
+                return await _proxy_chat(req, spec)
+            log.warning(f"[router] no backend for OVH model '{model_id}' — local fallback")
+            model_id = AGENT_MODEL or next(iter(AVAILABLE_MODELS), "")
+            routing_decision["model"] = model_id
+            routing_decision["strategy"] += "+local_fallback"
+
+    _last_routing_decision = routing_decision
+
+    # ── Profile behavioral settings ─────────────────────────────────────────
+    effective_thinking = req.thinking and active_profile_cfg.get("thinking", False) and not is_agent
+    profile_max_tokens = active_profile_cfg.get("max_new_tokens", MAX_NEW_TOKENS_DEFAULT)
+    # Client-supplied max_tokens wins when it differs from the request default;
+    # agent path caps tokens via MAX_NEW_TOKENS_AGENT (short tool-selection JSON).
+    effective_max_tokens = (
+        req.max_tokens
+        if req.max_tokens != MAX_NEW_TOKENS_DEFAULT
+        else (MAX_NEW_TOKENS_AGENT if is_agent else profile_max_tokens)
+    )
+
+    pipe = await get_model(model_id)
     model_id = next(k for k in loaded_models if loaded_models[k] is pipe)
     tokenizer = loaded_tokenizers[model_id]
 
@@ -1537,7 +1592,7 @@ async def chat(req: ChatRequest):
         log.info(f"[DEBUG] Rendered prompt ({model_id}, agent={is_agent}):\n{prompt[:3000]}")
 
     gen_config = ov_genai.GenerationConfig()
-    gen_config.max_new_tokens = MAX_NEW_TOKENS_AGENT if is_agent else req.max_tokens
+    gen_config.max_new_tokens = effective_max_tokens
     gen_config.temperature = req.temperature
     gen_config.do_sample = req.temperature > 0
 
