@@ -5,7 +5,7 @@ import openvino_genai as ov_genai
 from optimum.intel import OVModelForFeatureExtraction
 from transformers import AutoProcessor, AutoTokenizer
 import base64, io, urllib.request
-import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal, ctypes, contextvars, gc
+import psutil, time, uuid, os, logging, asyncio, dataclasses, re, sys, signal, ctypes, contextvars, gc, subprocess
 from PIL import Image
 from pathlib import Path
 from functools import partial
@@ -180,6 +180,24 @@ def _validate_config(cfg: dict) -> None:
 
 _cfg = _load_config()
 _validate_config(_cfg)
+
+# ---------------------------------------------------------------------------
+# Version info — read once at startup; never raises.
+# ---------------------------------------------------------------------------
+SERVER_VERSION = "0.9.0"
+
+def _read_git_commit() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(Path(__file__).parent), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=3,
+        )
+        return result.stdout.strip() if result.returncode == 0 else "unknown"
+    except Exception:
+        return "unknown"
+
+_GIT_COMMIT = _read_git_commit()
+log.info(f"Server version {SERVER_VERSION} commit {_GIT_COMMIT}")
 
 # ---------------------------------------------------------------------------
 # Model discovery — scans models_dir for valid OpenVINO LLM directories.
@@ -1466,6 +1484,23 @@ async def health():
         "routing_backend":       _cfg.get("routing", {}).get("default", "local"),
         "provider_scope":        _cfg.get("provider_scope", "local"),
         "last_routing_decision": _last_routing_decision,
+        "version":               SERVER_VERSION,
+        "commit":                _GIT_COMMIT,
+    }
+
+
+@app.get("/version")
+async def version():
+    try:
+        import openvino as ov
+        ov_ver = ov.__version__
+    except Exception:
+        ov_ver = "unknown"
+    return {
+        "version":    SERVER_VERSION,
+        "commit":     _GIT_COMMIT,
+        "python":     sys.version.split()[0],
+        "openvino":   ov_ver,
     }
 
 
