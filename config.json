@@ -6,8 +6,7 @@
     "vision_model":           "qwen2.5-vl-7b-int4-ov",
     "model_aliases": {
         "qwen2.5-coder:14b":  "qwen2.5-coder-14b-int4",
-        "qwen3-14b-int4":     "qwen3-14b-int4-ov",
-        "qwen3-30b":          "qwen3-30b-a3b-int4-ov"
+        "qwen3-14b-int4":     "qwen3-14b-int4-ov"
     },
 
     "max_loaded_models":      1,
@@ -35,13 +34,8 @@
     },
 
     "assessor": {
-        "model":          "qwen3-8b-int4-ov",
-        "kv_cache_size_gb": 1
-    },
-
-    "model_kv_overrides": {
-        "qwen3-coder-30b-a3b-int4-ov": 2,
-        "qwen3-30b-a3b-int4-ov":       2
+        "model":          "qwen3-14b-int4-ov",
+        "kv_cache_size_gb": 2
     },
 
     "router": {
@@ -94,8 +88,7 @@
             "description": "Search the web, find current events, retrieve live information",
             "signal":      "has_tools",
             "models": [
-                { "id": "qwen3-8b-int4-ov",       "provider": "loc", "tier": "fast" },
-                { "id": "qwen3-14b-int4-ov",      "provider": "loc", "tier": "best" },
+                { "id": "qwen3-14b-int4-ov",      "provider": "loc", "tier": "fast" },
                 { "id": "Qwen3-32B",               "provider": "ovh", "tier": "best" }
             ]
         },
@@ -105,7 +98,6 @@
             "context_threshold_tokens": 4000,
             "models": [
                 { "id": "qwen3-14b-int4-ov",      "provider": "loc", "tier": "fast" },
-                { "id": "qwen3-30b-a3b-int4-ov",  "provider": "loc", "tier": "best" },
                 { "id": "Qwen3-32B",               "provider": "ovh", "tier": "fast" },
                 { "id": "gpt-oss-120b",            "provider": "ovh", "tier": "best" }
             ]
@@ -114,7 +106,6 @@
             "description": "Write, debug, explain, or refactor code",
             "models": [
                 { "id": "qwen2.5-coder-14b-int4",        "provider": "loc", "tier": "fast" },
-                { "id": "qwen3-coder-30b-a3b-int4-ov",   "provider": "loc", "tier": "best" },
                 { "id": "Qwen3-Coder-480B-A35B",          "provider": "ovh", "tier": "best" }
             ]
         },
@@ -132,9 +123,7 @@
                 "jak zaplanować wakacje"
             ],
             "models": [
-                { "id": "qwen3-8b-int4-ov",         "provider": "loc", "tier": "fast" },
-                { "id": "qwen3-14b-int4-ov",        "provider": "loc", "tier": "best" },
-                { "id": "qwen3-30b-a3b-int4-ov",    "provider": "loc", "tier": "best" },
+                { "id": "qwen3-14b-int4-ov",        "provider": "loc", "tier": "fast" },
                 { "id": "Qwen3-32B",                 "provider": "ovh", "tier": "best" }
             ]
         }
