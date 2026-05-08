@@ -245,11 +245,21 @@
 
 ---
 
-## NOW
-
-**Working on:** End-to-end validation complete — VLM, web search (SearxNG), routing all working
-**Last commit:** 0d15d92 — fix: VLMPipeline must use GPU.1 not AUTO — AUTO causes shape error in vision encoder
+### 2026-05-08 — Session 25 (50f3057)
+**Working on:** Docker.md created; SearxNG JSON format fix; session wrap
+**Last commit:** 50f3057 — docs: session wrap — VLM fixed, embedder GPU.0, web search working end-to-end
 **Next action:** n8n AI Agent node validation (tool call loop); or VRAM bar overcount fix in ov_monitor
 **Blocked on:** nothing
-**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar in ov_monitor shows >100% (disk-size overcount). (4) SearxNG JSON format lost on container recreate.
+**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar in ov_monitor shows >100% (disk-size overcount).
+**Tests:** pass (176/176)
+
+---
+
+## NOW
+
+**Working on:** Docker management documented; all features working end-to-end
+**Last commit:** (this wrap commit)
+**Next action:** n8n AI Agent node validation (tool call loop); or VRAM bar overcount fix in ov_monitor
+**Blocked on:** nothing
+**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar in ov_monitor shows >100% (disk-size overcount).
 **Tests:** pass (176/176)
