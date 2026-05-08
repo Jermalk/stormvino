@@ -38,12 +38,13 @@
     },
 
     "router": {
-        "embedding_threshold":   0.72,
         "long_context_tokens":   4000,
         "keywords": {
             "web_search": [
                 "search for", "find on the web", "look up", "google",
-                "browse", "what's the latest", "latest news", "current events"
+                "browse", "what's the latest", "latest news", "current events",
+                "wyszukaj", "znajdź w internecie", "sprawdź w sieci",
+                "najnowsze wiadomości", "aktualne informacje", "co słychać"
             ]
         }
     },
@@ -52,20 +53,17 @@
         "fast": {
             "thinking":         false,
             "max_new_tokens":   512,
-            "model_preference": "fastest",
-            "use_assessor":     false
+            "model_preference": "fastest"
         },
         "precise": {
             "thinking":         true,
             "max_new_tokens":   4096,
-            "model_preference": "balanced",
-            "use_assessor":     true
+            "model_preference": "balanced"
         },
         "laborious": {
             "thinking":         true,
             "max_new_tokens":   16384,
-            "model_preference": "best",
-            "use_assessor":     true
+            "model_preference": "best"
         }
     },
 
@@ -114,7 +112,18 @@
             ]
         },
         "general": {
-            "description": "General conversation, questions, and open-ended reasoning",
+            "description": "General conversation, questions, opinions, advice, everyday topics, and open-ended reasoning",
+            "examples": [
+                "what should I have for dinner",
+                "recommend a book",
+                "how do I stay motivated",
+                "what is the weather like",
+                "tell me a joke",
+                "help me plan my weekend",
+                "co zjeść na obiad",
+                "jakie filmy warto obejrzeć",
+                "jak zaplanować wakacje"
+            ],
             "models": [
                 { "id": "qwen3-8b-int4-ov",         "provider": "loc", "tier": "fast" },
                 { "id": "qwen3-14b-int4-ov",        "provider": "loc", "tier": "best" },
