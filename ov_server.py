@@ -1942,6 +1942,7 @@ async def chat(req: ChatRequest):
 
                 completion_tokens = len(tokenizer.encode(answer)) if answer else 0
                 tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
+                finish_reason = "tool_calls" if tool_calls else "stop"
                 log.info(
                     f"{model_id} [agent]: {completion_tokens} tokens in {elapsed:.1f}s"
                     f" = {tok_per_sec:.1f} tok/s"
@@ -1965,10 +1966,8 @@ async def chat(req: ChatRequest):
                     if DEFAULT_MODEL and DEFAULT_MODEL != model_id:
                         asyncio.create_task(_warm_model(DEFAULT_MODEL))
                     delta = {"tool_calls": tool_calls}
-                    finish_reason = "tool_calls"
                 else:
                     delta = {"content": answer} if answer else {}
-                    finish_reason = "stop"
 
                 finish_chunk = json.dumps({
                     "id": f"chatcmpl-{chunk_id}",
