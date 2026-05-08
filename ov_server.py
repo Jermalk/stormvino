@@ -324,6 +324,7 @@ _profile_switching: bool = False
 _profile_lock = asyncio.Lock()
 _last_routing_decision: dict | None = None
 _assessor_pipe: "ov_genai.LLMPipeline | None" = None
+_assessor_tokenizer: Optional[AutoTokenizer] = None
 _assessor_lock = asyncio.Lock()
 _routing_prompt_cache: "dict[tuple[str, str], str]" = {}  # keyed (scope, profile_name)
 
@@ -1212,6 +1213,18 @@ async def _load_assessor() -> None:
         f" | VRAM ~{_vram_allocated['_assessor']:.1f}GB"
     )
 
+    # Load tokenizer so _assessor_pipe can be reused for task execution
+    global _assessor_tokenizer
+    try:
+        loop = asyncio.get_running_loop()
+        _assessor_tokenizer = await loop.run_in_executor(
+            None,
+            partial(AutoTokenizer.from_pretrained, AVAILABLE_MODELS[model_id], fix_mistral_regex=True)
+        )
+        log.info(f"[assessor] tokenizer ready for '{model_id}'")
+    except Exception as exc:
+        log.warning(f"[assessor] tokenizer load failed ({exc}) — pipe reuse disabled")
+
 
 def _build_routing_system_block(scope: str, profile_name: str) -> str:
     """Build (and cache) the static ChatML system block for the assessor routing prompt.
@@ -1280,6 +1293,50 @@ def _build_routing_prompt(req: "ChatRequest") -> str:
         + f"<|im_start|>user\n{query}\n<|im_end|>\n"
         + "<|im_start|>assistant\n"
     )
+
+
+async def _run_assessor_routing(req: "ChatRequest") -> dict:
+    """Run the assessor pipeline to classify the request's task class.
+
+    Acquires _assessor_lock for the generation (routing is serialised).
+    Falls back to {"task_class": "general", "confidence": 0.0} on any error.
+    Never raises.
+    """
+    prompt = _build_routing_prompt(req)
+    gen_config = ov_genai.GenerationConfig()
+    gen_config.max_new_tokens = 256
+    gen_config.temperature = 0.0
+    gen_config.do_sample = False
+
+    try:
+        loop = asyncio.get_running_loop()
+        async with _assessor_lock:
+            raw = await loop.run_in_executor(
+                None, partial(_assessor_pipe.generate, prompt, gen_config)
+            )
+        raw_text = decode_result(raw)
+        log.debug(f"[assessor] raw output: {raw_text[:400]!r}")
+
+        # Extract JSON object — model may emit preamble or markdown fences
+        start = raw_text.find("{")
+        end = raw_text.rfind("}") + 1
+        if start == -1 or end == 0:
+            raise ValueError(f"no JSON object found: {raw_text[:200]!r}")
+        result = json.loads(raw_text[start:end])
+        if "task_class" not in result:
+            raise ValueError(f"missing 'task_class': {result}")
+
+        # Validate against known task classes
+        known = set(_cfg.get("task_classes", {}).keys())
+        if result["task_class"] not in known:
+            log.warning(
+                f"[assessor] unknown task_class '{result['task_class']}' — fallback 'general'"
+            )
+            result["task_class"] = "general"
+        return result
+    except Exception as exc:
+        log.warning(f"[assessor] routing failed ({exc!r}) — fallback 'general'")
+        return {"task_class": "general", "confidence": 0.0}
 
 
 def _route_by_embedding(query: str) -> "tuple[str, float]":
@@ -1713,6 +1770,17 @@ async def chat(req: ChatRequest):
             _route_confidence = round(score, 4)
             if score >= threshold:
                 strategy = "embedding"
+            elif active_profile_cfg.get("use_assessor"):
+                if _assessor_pipe is not None:
+                    # Stage 3: assessor routing
+                    routing_json = await _run_assessor_routing(req)
+                    task_class = routing_json["task_class"]
+                    _route_confidence = round(float(routing_json.get("confidence", 0.0)), 4)
+                    strategy = "assessor"
+                else:
+                    log.info("[router] assessor not available — using fallback")
+                    task_class = task_class if score > 0.5 else "general"
+                    strategy = "general_fallback"
             else:
                 task_class = "general"
                 strategy = "general_fallback"
@@ -1757,9 +1825,18 @@ async def chat(req: ChatRequest):
         else (MAX_NEW_TOKENS_AGENT if is_agent else profile_max_tokens)
     )
 
-    pipe = await get_model(model_id)
-    model_id = next(k for k in loaded_models if loaded_models[k] is pipe)
-    tokenizer = loaded_tokenizers[model_id]
+    _assessor_model_id = _cfg.get("assessor", {}).get("model", "")
+    if (_assessor_pipe is not None
+            and _assessor_tokenizer is not None
+            and model_id == _assessor_model_id):
+        # Reuse the already-loaded assessor pipeline — no extra VRAM cost
+        pipe = _assessor_pipe
+        tokenizer = _assessor_tokenizer
+        log.debug(f"[router] reusing assessor pipe for task model '{model_id}'")
+    else:
+        pipe = await get_model(model_id)
+        model_id = next(k for k in loaded_models if loaded_models[k] is pipe)
+        tokenizer = loaded_tokenizers[model_id]
 
     prompt = build_prompt(req.messages, tokenizer, tools=req.tools, thinking=effective_thinking)
     if debug_logging:
