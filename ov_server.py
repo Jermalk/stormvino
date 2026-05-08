@@ -294,7 +294,7 @@ def _pick(key: str, fallback_index: int) -> str:
 
 DEFAULT_MODEL = _pick("default_model", -1)   # last (usually largest)
 AGENT_MODEL   = _pick("agent_model",    0)   # first (usually smallest)
-ROUTING_TRIGGER_MODELS: frozenset[str] = frozenset({"auto", ""})
+ROUTING_TRIGGER_MODELS: frozenset[str] = frozenset({"auto", "Auto", ""})
 
 # Embedding model — not auto-discovered (loaded via different code path)
 _emb_name          = _cfg.get("embedding_model", "")
@@ -959,11 +959,24 @@ def _scope_includes(scope: str, provider: str) -> bool:
     return provider in scope
 
 
+_AUTO_ENTRY: dict = {
+    "id":             "Auto",
+    "object":         "model",
+    "owned_by":       "ov-server",
+    "provider":       "loc",
+    "tier":           "auto",
+    "context_length": None,
+    "pricing":        None,
+    "loaded":         True,
+    "description":    "Automatic routing — server selects the best model for each request",
+}
+
+
 def _build_catalogue(scope: str) -> list[dict]:
     """Return merged model list for *scope*.
     Remote entries come from _catalogue_cache — call _refresh_catalogue() first
     if you need guaranteed-fresh data."""
-    entries = _local_catalogue()
+    entries = [_AUTO_ENTRY] + _local_catalogue()
     if _scope_includes(scope, "ovh"):
         cached_entries, _ = _catalogue_cache.get("ovh", ([], 0.0))
         entries.extend(cached_entries)

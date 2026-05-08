@@ -792,15 +792,15 @@ class TestBuildCatalogue:
             ov_server._catalogue_cache.pop("ovh", None)
             result = _build_catalogue("local")
         assert all(e["provider"] == "loc" for e in result)
-        assert len(result) == 2
+        assert len(result) == 3  # Auto entry + m1 + m2
 
     def test_local_scope_ignores_ovh_cache(self):
         ov_server._catalogue_cache["ovh"] = ([{"id": "cloud", "provider": "ovh"}], time.time())
         with self._with_local(["m1"]):
             result = _build_catalogue("local")
         ov_server._catalogue_cache.pop("ovh", None)
-        assert len(result) == 1
-        assert result[0]["id"] == "m1"
+        assert len(result) == 2  # Auto entry + m1
+        assert any(e["id"] == "m1" for e in result)
 
     def test_ovh_scope_includes_cached_ovh(self):
         ov_server._catalogue_cache["ovh"] = ([{"id": "cloud", "provider": "ovh"}], time.time())
@@ -808,7 +808,7 @@ class TestBuildCatalogue:
             result = _build_catalogue("local+ovh")
         ov_server._catalogue_cache.pop("ovh", None)
         ids = {e["id"] for e in result}
-        assert ids == {"m1", "cloud"}
+        assert ids == {"Auto", "m1", "cloud"}
 
     def test_all_scope_includes_cached_ovh(self):
         ov_server._catalogue_cache["ovh"] = ([{"id": "cloud", "provider": "ovh"}], time.time())
@@ -826,13 +826,13 @@ class TestBuildCatalogue:
         ov_server._catalogue_cache.pop("ovh", None)
         with self._with_local(["m1"]):
             result = _build_catalogue("local+ovh")
-        assert len(result) == 1
+        assert len(result) == 2  # Auto entry + m1
 
     def test_empty_available_models_returns_empty(self):
         ov_server._catalogue_cache.pop("ovh", None)
         with patch.object(ov_server, "_local_catalogue", return_value=[]):
             result = _build_catalogue("local")
-        assert result == []
+        assert result == [ov_server._AUTO_ENTRY]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
