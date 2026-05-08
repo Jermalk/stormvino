@@ -1920,11 +1920,20 @@ async def chat(req: ChatRequest):
 
         async def agent_stream():
             start = time.time()
+            yield ": keepalive\n\n"  # byte before lock wait resets client TTFT timeout
+
             try:
                 async with _infer_lock(model_id):
-                    raw = await loop.run_in_executor(
-                        None, partial(pipe.generate, prompt, gen_config)
+                    gen_task = asyncio.ensure_future(
+                        loop.run_in_executor(None, partial(pipe.generate, prompt, gen_config))
                     )
+                    while True:
+                        try:
+                            await asyncio.wait_for(asyncio.shield(gen_task), timeout=3.0)
+                            break
+                        except asyncio.TimeoutError:
+                            yield ": keepalive\n\n"
+                    raw = gen_task.result()
                 raw_text = decode_result(raw)
                 elapsed = time.time() - start
                 if debug_logging:
@@ -2031,6 +2040,7 @@ async def chat(req: ChatRequest):
             gen_task = asyncio.create_task(run_generation())
             handler = ThinkStreamHandler(strategy=_think_strategy)
             start = time.time()
+            yield ": keepalive\n\n"  # byte before prefill resets client TTFT timeout
 
             try:
                 while True:
