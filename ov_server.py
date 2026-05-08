@@ -325,6 +325,7 @@ _profile_lock = asyncio.Lock()
 _last_routing_decision: dict | None = None
 _assessor_pipe: "ov_genai.LLMPipeline | None" = None
 _assessor_lock = asyncio.Lock()
+_routing_prompt_cache: "dict[tuple[str, str], str]" = {}  # keyed (scope, profile_name)
 
 COMPLEXITY_SIGNALS: tuple[str, ...] = (
     "analyze", "compare", "explain in detail", "evaluate", "critique",
@@ -1212,6 +1213,75 @@ async def _load_assessor() -> None:
     )
 
 
+def _build_routing_system_block(scope: str, profile_name: str) -> str:
+    """Build (and cache) the static ChatML system block for the assessor routing prompt.
+
+    Cached per (scope, profile_name) so all requests with the same pair share an
+    identical prefix — enabling prefix caching on the assessor pipeline.
+    Contains only config-derived content: no runtime state (loaded, VRAM, etc.).
+    """
+    cache_key = (scope, profile_name)
+    if cache_key in _routing_prompt_cache:
+        return _routing_prompt_cache[cache_key]
+
+    # Task classes: filter models by scope; strip runtime fields (loaded, VRAM)
+    tc_block: dict = {}
+    for name, cls_cfg in _cfg.get("task_classes", {}).items():
+        models_in_scope = [
+            {"id": m["id"], "provider": m.get("provider", "loc"), "tier": m.get("tier", "")}
+            for m in cls_cfg.get("models", [])
+            if _scope_includes(scope, m.get("provider", "loc"))
+        ]
+        if not models_in_scope:
+            continue
+        tc_block[name] = {
+            "description": cls_cfg.get("description", ""),
+            "models": models_in_scope,
+        }
+
+    # Profile summary — behavioural fields only, no runtime state
+    profile_cfg = _cfg.get("profiles", {}).get(profile_name, {})
+    prof_desc = (
+        f"model_preference={profile_cfg.get('model_preference', 'balanced')}, "
+        f"thinking={profile_cfg.get('thinking', False)}"
+    )
+
+    system_content = (
+        "You are a routing agent. Given a user query, select the best task class and model.\n"
+        "Output only valid JSON. Do not explain.\n\n"
+        f"Task classes:\n{json.dumps(tc_block, indent=2)}\n\n"
+        f"Active profile: {profile_name} — {prof_desc}\n\n"
+        "Respond with JSON:\n"
+        '{"task_class": "<name>", "confidence": <0.0-1.0>, "reasoning": "<one line>"}'
+    )
+
+    block = f"<|im_start|>system\n{system_content}\n<|im_end|>\n"
+    _routing_prompt_cache[cache_key] = block
+    return block
+
+
+def _build_routing_prompt(req: "ChatRequest") -> str:
+    """Build the full ChatML assessor routing prompt for the given request.
+
+    System block is cached per (scope, profile) — only the user block varies.
+    Includes last 3 user turns (with assistant replies for context), truncated
+    to ~512 tokens total.
+    """
+    scope = _cfg.get("provider_scope", "local")
+    system_block = _build_routing_system_block(scope, _active_profile)
+
+    # Last 3 user+assistant turns for context
+    context_msgs = [m for m in req.messages if m.role in ("user", "assistant")][-6:]
+    parts = [f"{m.role}: {_text_content(m)[:800]}" for m in context_msgs]
+    query = "\n".join(parts)[-2048:]  # ~512-token char budget
+
+    return (
+        system_block
+        + f"<|im_start|>user\n{query}\n<|im_end|>\n"
+        + "<|im_start|>assistant\n"
+    )
+
+
 def _route_by_embedding(query: str) -> "tuple[str, float]":
     """Return (task_class, cosine_similarity) for the best-matching task class.
     Returns ('general', 0.0) when embeddings are unavailable."""
@@ -1421,6 +1491,7 @@ async def set_scope(req: ScopeRequest) -> JSONResponse:
         )
     _cfg["provider_scope"] = req.scope
     _catalogue_cache.clear()
+    _routing_prompt_cache.clear()  # scope change invalidates cached system blocks
     return JSONResponse(status_code=200, content={"scope": req.scope})
 
 

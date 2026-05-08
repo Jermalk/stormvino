@@ -19,6 +19,9 @@ from ov_server import (
     ContentPart,
     Message,
     ThinkStreamHandler,
+    _build_routing_prompt,
+    _build_routing_system_block,
+    _routing_prompt_cache,
     _VALID_SCOPES,
     _build_catalogue,
     _compute_task_class_centroids,
@@ -1603,3 +1606,77 @@ class TestThinkStreamHandler:
         h = ThinkStreamHandler(strategy="separate_field")
         deltas = _feed_all(h, ["Plain", " text"])
         assert all("reasoning_content" not in d for d in deltas)
+
+
+# ---------------------------------------------------------------------------
+# _build_routing_system_block / _build_routing_prompt
+# ---------------------------------------------------------------------------
+
+class TestBuildRoutingSystemBlock:
+
+    def setup_method(self):
+        _routing_prompt_cache.clear()
+
+    def test_returns_chatml_system_marker(self):
+        block = _build_routing_system_block("local", "fast")
+        assert "<|im_start|>system" in block
+        assert "<|im_end|>" in block
+
+    def test_contains_task_class_names(self):
+        block = _build_routing_system_block("local", "fast")
+        import ov_server
+        for name in ov_server._cfg.get("task_classes", {}):
+            assert name in block
+
+    def test_no_runtime_fields(self):
+        block = _build_routing_system_block("local", "fast")
+        assert '"loaded"' not in block
+        assert '"vram"' not in block.lower()
+
+    def test_cached_on_second_call(self):
+        b1 = _build_routing_system_block("local", "fast")
+        b2 = _build_routing_system_block("local", "fast")
+        assert b1 is b2  # same object — from cache
+
+    def test_different_scope_different_block(self):
+        b_local = _build_routing_system_block("local", "fast")
+        b_ovh   = _build_routing_system_block("local+ovh", "fast")
+        assert b_local != b_ovh
+
+    def test_profile_name_appears(self):
+        block = _build_routing_system_block("local", "precise")
+        assert "precise" in block
+
+
+class TestBuildRoutingPrompt:
+
+    def setup_method(self):
+        _routing_prompt_cache.clear()
+
+    def _make_req(self, text: str):
+        return type("R", (), {
+            "messages": [Message(role="user", content=text)],
+        })()
+
+    def test_contains_chatml_markers(self):
+        req = self._make_req("hello")
+        prompt = _build_routing_prompt(req)
+        assert "<|im_start|>system" in prompt
+        assert "<|im_start|>user" in prompt
+        assert "<|im_start|>assistant" in prompt
+
+    def test_user_text_in_prompt(self):
+        req = self._make_req("what is the weather?")
+        prompt = _build_routing_prompt(req)
+        assert "weather" in prompt
+
+    def test_long_input_truncated(self):
+        req = self._make_req("x" * 10_000)
+        prompt = _build_routing_prompt(req)
+        # User block must not blow past reasonable size
+        assert len(prompt) < 12_000
+
+    def test_ends_with_assistant_header(self):
+        req = self._make_req("hello")
+        prompt = _build_routing_prompt(req)
+        assert prompt.endswith("<|im_start|>assistant\n")
