@@ -38,6 +38,10 @@
         "kv_cache_size_gb": 2
     },
 
+    "model_kv_overrides": {
+        "qwen3-14b-int4-ov": 4
+    },
+
     "router": {
         "long_context_tokens":   4000,
         "keywords": {
