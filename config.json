@@ -71,8 +71,16 @@
 
     "task_classes": {
         "vision": {
-            "description": "Image understanding, visual question answering, or document OCR",
+            "description": "Analyzing or describing an image, photo, chart, diagram, or screenshot",
             "signal":      "has_image",
+            "examples": [
+                "describe this image",
+                "what is in this photo",
+                "read the text in this picture",
+                "what does this chart show",
+                "analyze this screenshot",
+                "identify objects in the image"
+            ],
             "models": [
                 { "id": "qwen2.5-vl-7b-int4-ov", "provider": "loc", "tier": "fast" }
             ]

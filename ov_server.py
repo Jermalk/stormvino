@@ -766,14 +766,37 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
         try:
             pipe = await _do_load()
         except Exception as e:
-            # OpenVINO KV-cache OOM: our VRAM estimates can be imprecise; evict and retry once.
-            if "size_in_bytes <= total_mem_size" in str(e) and loaded_models:
+            err_str = str(e)
+            # OpenVINO KV-cache OOM: evict LRU and retry once.
+            if "size_in_bytes <= total_mem_size" in err_str and loaded_models:
                 log.warning(f"VRAM OOM loading {model_id} — evicting LRU and retrying")
                 _evict_lru()
                 try:
                     pipe = await _do_load()
                 except Exception as e2:
                     log.error(f"Failed to load {model_id} after eviction: {e2}")
+                    raise HTTPException(status_code=500, detail=str(e2))
+            elif "m_element_type.is_static()" in err_str:
+                # Stale OV compiled-model cache or prefix-caching incompatibility.
+                # Retry once with prefix caching disabled.
+                log.warning(
+                    f"OV prefix-cache error loading {model_id} — retrying without prefix caching"
+                )
+                async def _do_load_no_prefix() -> ov_genai.LLMPipeline:
+                    sched = ov_genai.SchedulerConfig()
+                    sched.cache_size = _cfg.get("kv_cache_size_gb", 8)
+                    sched.enable_prefix_caching = False
+                    sched.max_num_batched_tokens = _cfg.get("max_num_batched_tokens", 4096)
+                    _loop = asyncio.get_running_loop()
+                    return await _loop.run_in_executor(
+                        None,
+                        partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
+                                scheduler_config=sched, **CONFIG)
+                    )
+                try:
+                    pipe = await _do_load_no_prefix()
+                except Exception as e2:
+                    log.error(f"Failed to load {model_id} without prefix caching: {e2}")
                     raise HTTPException(status_code=500, detail=str(e2))
             else:
                 log.error(f"Failed to load {model_id}: {e}")
@@ -1188,7 +1211,7 @@ async def _load_assessor() -> None:
     kv_gb = assessor_cfg.get("kv_cache_size_gb", 2)
     sched = ov_genai.SchedulerConfig()
     sched.cache_size = kv_gb
-    sched.enable_prefix_caching = _cfg.get("enable_prefix_caching", True)
+    sched.enable_prefix_caching = False   # routing queries are short/unique; prefix cache adds OOM risk
     sched.max_num_batched_tokens = _cfg.get("max_num_batched_tokens", 4096)
 
     weights_gb = model_size_gb(model_id)
