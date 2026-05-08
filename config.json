@@ -1,7 +1,7 @@
 {
     "models_dir":             "/opt/ov_server/models",
     "device":                 "AUTO",
-    "ov_cache_dir":           "/tmp/ov_cache_b60",
+    "ov_cache_dir":           "/home/jerzy/.cache/ov_b60",
     "embedding_model":        "multilingual-e5-large-int8",
     "vision_model":           "qwen2.5-vl-7b-int4-ov",
     "model_aliases": {
@@ -36,7 +36,7 @@
 
     "assessor": {
         "model":          "qwen3-8b-int4-ov",
-        "kv_cache_size_gb": 2
+        "kv_cache_size_gb": 4
     },
 
     "router": {
