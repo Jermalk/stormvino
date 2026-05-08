@@ -1,7 +1,7 @@
 # CLAUDE.md — ov_server (OpenVINO OpenAI-Compatible API Server)
 
-> **Context budget rule:** This file must stay under 320 lines.
-> When approaching the limit, extract sections to `CLAUDE-ref-N.md` and replace with a pointer.
+> **CLAUDE.md file budget:** This file must stay under 320 lines (hard cap).
+> At 290+ lines, extract the largest section to `CLAUDE-ref-N.md` and replace with a one-line pointer.
 > Never load a `CLAUDE-ref` file unless the user explicitly asks about its topic.
 
 ---
@@ -104,13 +104,14 @@ FastAPI server exposing an OpenAI-compatible REST API (`/v1/chat/completions`, `
 
 Never load speculatively. Test files only when writing or fixing that test.
 
-**Context-filling trigger — when sum of open file lines exceeds 800:**
-1. Write current state to `SCRATCHPAD.md` immediately (facts only, bullets).
-2. Finish the current atomic unit (one function or one test).
-3. Commit what is complete.
-4. Tell the user: *"Context is filling — recommend a new session. SCRATCHPAD.md has the handoff."*
+**Two separate limits — do not confuse them:**
 
-Do not attempt to complete a large task when context is near limit.
+| Limit | Threshold | What to do |
+|---|---|---|
+| CLAUDE.md file budget | 290 lines (hard cap 320) | Extract largest section to `CLAUDE-ref-N.md` |
+| Context load budget | 800 lines of actively-loaded files | Flush to SCRATCHPAD, finish atomic unit, commit, recommend new session |
+
+*Context load* counts only files explicitly Read or written this session — not tool output, not PROGRESS.md already closed.
 
 ---
 
@@ -140,6 +141,8 @@ File has two parts: history (append-only, skip on re-entry) and NOW (overwritten
 **Rejected alternative:** <one sentence, or "none considered">
 **Affects:** <file or component name>
 ```
+
+**Write immediately** when an architectural decision is made during a session — do not defer to session-wrap. One entry per decision, appended in real time.
 
 Read `DECISIONS.md` only when the user explicitly asks about a past decision.
 
