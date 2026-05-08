@@ -235,11 +235,21 @@
 
 ---
 
+### 2026-05-08 — Session 24 (0d15d92)
+**Working on:** GPU.0 embedder, assessor OOM fix, VLM fix (AUTO device → GPU.1), web search end-to-end
+**Last commit:** 0d15d92 — fix: VLMPipeline must use GPU.1 not AUTO
+**Next action:** n8n AI Agent tool call validation; VRAM bar overcount fix in ov_monitor
+**Blocked on:** nothing
+**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar in ov_monitor shows >100% (disk-size overcount). (4) SearxNG JSON config lost on container recreate — needs docker run env var.
+**Tests:** pass (176/176)
+
+---
+
 ## NOW
 
-**Working on:** phi-4 startup preload review — should agent_model/default_model change now that qwen3-14b is live?
-**Last commit:** 4e80e9b — fix: exclude system messages from long_context token estimate
-**Next action:** Read config.json and ov_server.py startup preload logic (~line 1505); decide what default_model and agent_model should be; update config and test.
+**Working on:** End-to-end validation complete — VLM, web search (SearxNG), routing all working
+**Last commit:** 0d15d92 — fix: VLMPipeline must use GPU.1 not AUTO — AUTO causes shape error in vision encoder
+**Next action:** n8n AI Agent node validation (tool call loop); or VRAM bar overcount fix in ov_monitor
 **Blocked on:** nothing
-**Open questions:** (1) phi-4 preloads at startup as agent_model — unnecessary now qwen3-14b available? (2) STT Phase 1 still queued. (3) Embedding threshold 0.72 needs live tuning.
+**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar in ov_monitor shows >100% (disk-size overcount). (4) SearxNG JSON format lost on container recreate.
 **Tests:** pass (176/176)
