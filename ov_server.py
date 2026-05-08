@@ -622,6 +622,53 @@ class AsyncTokenStreamer(ov_genai.StreamerBase):
         self._loop.call_soon_threadsafe(self._queue.put_nowait, None)
 
 
+class ThinkStreamHandler:
+    """Buffer <think> blocks and emit content or reasoning_content based on strategy.
+
+    strategy="suppress"      — fast profile: discard think block entirely.
+    strategy="separate_field" — precise/laborious: emit reasoning_content (Open WebUI compatible).
+    """
+    def __init__(self, strategy: str = "suppress") -> None:
+        self.strategy = strategy
+        self.buf = ""
+        self.in_think = False
+        self.think_acc = ""
+
+    def feed(self, token: str) -> list[dict]:
+        """Return list of delta dicts to emit. May be empty while buffering."""
+        self.buf += token
+        out: list[dict] = []
+        if not self.in_think:
+            if "<think>" in self.buf:
+                before, _, rest = self.buf.partition("<think>")
+                if before.strip():
+                    out.append({"content": before})
+                self.buf, self.in_think, self.think_acc = rest, True, ""
+            else:
+                # Keep last 7 chars buffered — long enough to detect "<think>"
+                safe, self.buf = self.buf[:-7], self.buf[-7:]
+                if safe:
+                    out.append({"content": safe})
+        else:
+            if "</think>" in self.buf:
+                think_raw, _, rest = self.buf.partition("</think>")
+                self.think_acc += think_raw
+                self.buf, self.in_think = rest, False
+                if self.strategy == "separate_field":
+                    out.append({"content": "", "reasoning_content": self.think_acc})
+        return out
+
+    def flush(self) -> list[dict]:
+        """Drain any remaining buffer at end of stream."""
+        return [{"content": self.buf}] if self.buf and not self.in_think else []
+
+
+class StreamingToolCallHandler:
+    """Stub — full streaming tool call support deferred to Phase 3.
+    Currently the buffered agent_stream() path handles all tool calls."""
+    pass
+
+
 # ---------------------------------------------------------------------------
 # VRAM helpers
 # ---------------------------------------------------------------------------
@@ -1675,6 +1722,18 @@ async def chat(req: ChatRequest):
                     })
                     yield f"data: {content_chunk}\n\n"
                 yield f"data: {finish_chunk}\n\n"
+                usage_chunk = json.dumps({
+                    "id": f"chatcmpl-{chunk_id}",
+                    "object": "chat.completion.chunk",
+                    "model": model_id,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
+                    "usage": {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": prompt_tokens + completion_tokens,
+                    },
+                })
+                yield f"data: {usage_chunk}\n\n"
                 yield "data: [DONE]\n\n"
             finally:
                 stats.active_requests -= 1
@@ -1701,49 +1760,62 @@ async def chat(req: ChatRequest):
             )
 
         chunk_id = uuid.uuid4().hex[:8]
+        _stream_stats: dict = {"completion_tokens": 0}
+        _think_strategy = "suppress" if _active_profile == "fast" else "separate_field"
 
         async def token_generator():
             gen_task = asyncio.create_task(run_generation())
-            completion_tokens = 0
+            handler = ThinkStreamHandler(strategy=_think_strategy)
             start = time.time()
 
             try:
                 while True:
                     token = await queue.get()
                     if token is None:
+                        for delta in handler.flush():
+                            flush_chunk = {
+                                "id": f"chatcmpl-{chunk_id}",
+                                "object": "chat.completion.chunk",
+                                "model": model_id,
+                                "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                            }
+                            yield f"data: {json.dumps(flush_chunk)}\n\n"
                         break
-                    completion_tokens += 1
-                    chunk = {
-                        "id": f"chatcmpl-{chunk_id}",
-                        "object": "chat.completion.chunk",
-                        "model": model_id,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {"content": token},
-                            "finish_reason": None
-                        }]
-                    }
-                    yield f"data: {json.dumps(chunk)}\n\n"
+                    _stream_stats["completion_tokens"] += 1
+                    for delta in handler.feed(token):
+                        chunk = {
+                            "id": f"chatcmpl-{chunk_id}",
+                            "object": "chat.completion.chunk",
+                            "model": model_id,
+                            "choices": [{"index": 0, "delta": delta, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(chunk)}\n\n"
             finally:
                 await gen_task
                 lock.release()
                 stats.active_requests -= 1
                 elapsed = time.time() - start
-                tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
-                log.info(f"{model_id} [stream]: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
-                _record_stats(model_id, completion_tokens, elapsed, tok_per_sec)
-
-        finish_chunk = json.dumps({
-            "id": f"chatcmpl-{chunk_id}",
-            "object": "chat.completion.chunk",
-            "model": model_id,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]
-        })
+                ct = _stream_stats["completion_tokens"]
+                tok_per_sec = ct / elapsed if elapsed > 0 else 0
+                log.info(f"{model_id} [stream]: {ct} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s")
+                _record_stats(model_id, ct, elapsed, tok_per_sec)
 
         async def full_stream():
             async for chunk in token_generator():
                 yield chunk
-            yield f"data: {finish_chunk}\n\n"
+            ct = _stream_stats["completion_tokens"]
+            final_chunk = json.dumps({
+                "id": f"chatcmpl-{chunk_id}",
+                "object": "chat.completion.chunk",
+                "model": model_id,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": ct,
+                    "total_tokens": prompt_tokens + ct,
+                },
+            })
+            yield f"data: {final_chunk}\n\n"
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(full_stream(), media_type="text/event-stream")

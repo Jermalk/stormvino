@@ -18,6 +18,7 @@ import ov_server
 from ov_server import (
     ContentPart,
     Message,
+    ThinkStreamHandler,
     _VALID_SCOPES,
     _build_catalogue,
     _compute_task_class_centroids,
@@ -1542,3 +1543,63 @@ class TestSelectModel:
         result = _run_select("vision", _PROFILE_FASTEST, available={})
         # no models available → fallback
         assert "id" in result
+
+
+# ---------------------------------------------------------------------------
+# ThinkStreamHandler
+# ---------------------------------------------------------------------------
+
+def _feed_all(handler, tokens):
+    """Feed list of tokens; return all emitted delta dicts."""
+    out = []
+    for t in tokens:
+        out.extend(handler.feed(t))
+    out.extend(handler.flush())
+    return out
+
+
+class TestThinkStreamHandler:
+
+    def test_no_think_block_passes_through(self):
+        h = ThinkStreamHandler(strategy="suppress")
+        tokens = ["Hello", " world", "!"]
+        deltas = _feed_all(h, tokens)
+        text = "".join(d["content"] for d in deltas)
+        assert "Hello world!" in text
+
+    def test_suppress_drops_think_block(self):
+        h = ThinkStreamHandler(strategy="suppress")
+        tokens = ["<think>", "reasoning here", "</think>", "Answer"]
+        deltas = _feed_all(h, tokens)
+        texts = [d.get("content", "") for d in deltas]
+        full = "".join(texts)
+        assert "reasoning here" not in full
+        assert "Answer" in full
+
+    def test_separate_field_emits_reasoning_content(self):
+        h = ThinkStreamHandler(strategy="separate_field")
+        tokens = ["<think>", "my reasoning", "</think>", "Answer"]
+        deltas = _feed_all(h, tokens)
+        reasoning = next((d.get("reasoning_content") for d in deltas if "reasoning_content" in d), None)
+        assert reasoning is not None
+        assert "my reasoning" in reasoning
+
+    def test_content_after_think_emitted(self):
+        h = ThinkStreamHandler(strategy="suppress")
+        tokens = ["<think>skip</think>", "real answer"]
+        deltas = _feed_all(h, tokens)
+        texts = "".join(d.get("content", "") for d in deltas)
+        assert "real answer" in texts
+        assert "skip" not in texts
+
+    def test_flush_emits_remaining_buffer(self):
+        h = ThinkStreamHandler(strategy="suppress")
+        h.feed("He")
+        h.feed("llo")
+        deltas = h.flush()
+        assert any("llo" in d.get("content", "") for d in deltas)
+
+    def test_no_think_block_separate_field_no_reasoning(self):
+        h = ThinkStreamHandler(strategy="separate_field")
+        deltas = _feed_all(h, ["Plain", " text"])
+        assert all("reasoning_content" not in d for d in deltas)
