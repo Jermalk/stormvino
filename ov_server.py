@@ -1294,16 +1294,32 @@ async def _load_assessor() -> None:
     weights_gb = model_size_gb(model_id)
     log.info(f"[assessor] loading '{model_id}' (~{weights_gb:.1f}GB weights + {kv_gb}GB KV)...")
     start = time.time()
+    loop = asyncio.get_running_loop()
     try:
-        loop = asyncio.get_running_loop()
         pipe = await loop.run_in_executor(
             None,
             partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
                     scheduler_config=sched, **CONFIG)
         )
     except Exception as exc:
-        log.error(f"[assessor] failed to load '{model_id}': {exc}")
-        return
+        if "m_element_type.is_static()" in str(exc):
+            # Stale compiled blob in main cache — retry with a dedicated assessor cache dir
+            # so OV compiles fresh and stores the new blob there (not in the shared cache).
+            log.warning(f"[assessor] stale blob — retrying with dedicated assessor cache")
+            assessor_cache = str(Path(CONFIG["CACHE_DIR"]).parent / (Path(CONFIG["CACHE_DIR"]).name + "_assessor"))
+            retry_config = {**CONFIG, "CACHE_DIR": assessor_cache}
+            try:
+                pipe = await loop.run_in_executor(
+                    None,
+                    partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
+                            scheduler_config=sched, **retry_config)
+                )
+            except Exception as exc2:
+                log.error(f"[assessor] failed to load '{model_id}' even with fresh cache: {exc2}")
+                return
+        else:
+            log.error(f"[assessor] failed to load '{model_id}': {exc}")
+            return
 
     elapsed = time.time() - start
     _assessor_pipe = pipe
