@@ -205,11 +205,21 @@
 
 ---
 
+### 2026-05-08 — Session 21 (91a4d28)
+**Working on:** Observability Phase 1, model fixes, OV cache, per-model KV override
+**Last commit:** 91a4d28 — feat: per-model KV override + assessor KV→1GB for 30B model support
+**Next action:** Fix bad models — see SCRATCHPAD.md "Fix commands" — swap qwen3-30b dir, download official qwen3-8b
+**Blocked on:** nothing
+**Open questions:** (1) Is 2GB KV for 30B models acceptable context-wise, or should they be OVH-only? (2) qwen3-coder-30b not tested yet — needs 40 min first-compile. (3) Assessor broken until qwen3-8b replaced.
+**Tests:** pass (176/176)
+
+---
+
 ## NOW
 
-**Working on:** Live routing validation — server running, autotest framework set up
-**Last commit:** 79e3ed9 — fix: OV prefix-cache retry, assessor scheduler, vision centroid
-**Next action:** Run live routing tests, record results in ~/autotest/20260508_79e3ed9.md
+**Working on:** Model replacement — qwen3-8b (assessor) and qwen3-30b still self-converted, break on fresh OV 2026.1.0 compile.
+**Last commit:** 91a4d28 — feat: per-model KV override + assessor KV→1GB for 30B model support
+**Next action:** Read SCRATCHPAD.md "Fix commands" — swap 30B dir first (official is in -bak), then download official qwen3-8b
 **Blocked on:** nothing
-**Open questions:** (1) Embedding threshold 0.72 — tune after live test. (2) Assessor JSON output quality — needs real-traffic validation. (3) STT queued.
-**Tests:** pass (186/186)
+**Open questions:** (1) Official HF name for qwen3-8b OV release. (2) Accept 2GB KV for 30B or push to OVH?
+**Tests:** pass (176/176)
