@@ -775,6 +775,15 @@ async def _warm_model(model_id: str) -> None:
         log.warning(f"Preload failed for {model_id}: {exc}")
 
 
+async def _warm_vlm(model_id: str) -> None:
+    """Fire-and-forget VLM preload helper — exceptions are logged, never raised."""
+    try:
+        await get_vlm(model_id)
+        log.info(f"VLM preload complete: {model_id}")
+    except Exception as exc:
+        log.warning(f"VLM preload failed for {model_id}: {exc}")
+
+
 async def _apply_profile(name: str) -> None:
     """Evict all LLMs, apply profile settings, then preload the agent model."""
     global _active_profile, _profile_switching, DEFAULT_MODEL, AGENT_MODEL, MAX_LOADED_MODELS
@@ -1311,6 +1320,9 @@ async def _startup_preload() -> None:
     if AGENT_MODEL:
         log.info(f"Scheduling startup preload of agent model '{AGENT_MODEL}'")
         asyncio.create_task(_warm_model(AGENT_MODEL))
+    if VISION_MODEL:
+        log.info(f"Scheduling startup preload of VLM '{VISION_MODEL}'")
+        asyncio.create_task(_warm_vlm(VISION_MODEL))
 
 
 @app.on_event("shutdown")
