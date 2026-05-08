@@ -187,9 +187,9 @@
 
 ## NOW
 
-**Working on:** Phase 2 Step 2.2 complete — _route_by_embedding()
+**Working on:** Phase 2 Step 2.3 complete — complexity_score() + _select_model()
 **Last commit:** (pending)
-**Next action:** PLAN_routing.md Phase 2 Step 2.3 — _select_model()
+**Next action:** PLAN_routing.md Phase 2 Step 2.4 — wire routing into chat()
 **Blocked on:** nothing
 **Open questions:** (1) Embedding threshold 0.72 — tune after Phase 2 live. (2) OVH TTL 300s. (3) STT queued, lower priority.
-**Tests:** pass (150/150) — `make test`
+**Tests:** pass (170/170) — `make test`

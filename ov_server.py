@@ -322,6 +322,17 @@ _active_profile: str = _cfg.get("active_profile", "fast")
 _profile_switching: bool = False
 _profile_lock = asyncio.Lock()
 
+COMPLEXITY_SIGNALS: tuple[str, ...] = (
+    "analyze", "compare", "explain in detail", "evaluate", "critique",
+    "summarize", "translate", "implement", "design", "architecture",
+    "step by step", "in depth", "thoroughly", "comprehensive", "detailed",
+)
+SIMPLE_Q_RE = re.compile(
+    r"^(what|who|when|where|how much|how many|is|are|was|were|can|does|do|did)"
+    r"\b.{0,60}\??\s*$",
+    re.IGNORECASE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Memory guard
@@ -1126,6 +1137,87 @@ def _route_by_embedding(query: str) -> "tuple[str, float]":
         if score > best_score:
             best_class, best_score = task_class, score
     return (best_class, best_score)
+
+
+# ---------------------------------------------------------------------------
+# Model selector — Stage 2/3 routing
+# ---------------------------------------------------------------------------
+
+def complexity_score(req: "ChatRequest") -> float:
+    """0.0 = simple, 1.0 = complex. Breaks ties within a preference tier."""
+    last_user = next(
+        (_text_content(m) for m in reversed(req.messages) if m.role == "user"),
+        "",
+    )
+    words = last_user.split()
+    score = 0.0
+    if len(words) > 50:
+        score += 0.3
+    if len(words) > 150:
+        score += 0.2
+    hits = sum(1 for s in COMPLEXITY_SIGNALS if s in last_user.lower())
+    score += min(hits * 0.15, 0.4)
+    if sum(1 for m in req.messages if m.role == "user") > 4:
+        score += 0.1
+    if SIMPLE_Q_RE.match(last_user.strip()):
+        score -= 0.3
+    return max(0.0, min(1.0, score))
+
+
+def _select_model(task_class: str, profile: dict, complexity: float = 0.0) -> dict:
+    """Return {id, provider} for the best available model given task class and profile.
+
+    Preference escalation: fastest → balanced → best → any available.
+    balanced + complexity > 0.65 promotes to best.
+    Models not on disk (provider=loc, absent from AVAILABLE_MODELS) are skipped with a warning.
+    Falls back to AGENT_MODEL if nothing is available.
+    """
+    all_models: list[dict] = _cfg.get("task_classes", {}).get(task_class, {}).get("models", [])
+    scope: str = _cfg.get("provider_scope", "local")
+
+    # Filter by active scope, log skipped unavailable local models
+    available: list[dict] = []
+    for m in all_models:
+        if not _scope_includes(scope, m.get("provider", "loc")):
+            continue
+        if m.get("provider") == "loc" and m["id"] not in AVAILABLE_MODELS and m["id"] not in AVAILABLE_VLM_MODELS:
+            log.warning(f"[router] '{m['id']}' not on disk — skipped (task_class='{task_class}')")
+            continue
+        available.append(m)
+
+    if not available:
+        fallback_id = AGENT_MODEL or next(iter(AVAILABLE_MODELS), "")
+        log.error(f"[router] no available models for task_class='{task_class}' scope='{scope}' — fallback '{fallback_id}'")
+        return {"id": fallback_id, "provider": "loc"}
+
+    # Effective preference, with complexity promotion
+    pref = profile.get("model_preference", "balanced")
+    if pref == "balanced" and complexity > 0.65:
+        pref = "best"
+
+    def _fastest() -> dict | None:
+        return next((m for m in available if m.get("tier") == "fast" and m.get("provider") == "loc"), None)
+
+    def _balanced() -> dict | None:
+        loc = [m for m in available if m.get("provider") == "loc"]
+        return loc[-1] if loc else None
+
+    def _best() -> dict | None:
+        return available[-1] if available else None
+
+    if pref == "fastest":
+        chosen = _fastest() or _balanced() or _best()
+    elif pref == "balanced":
+        chosen = _balanced() or _best()
+    else:
+        chosen = _best()
+
+    if chosen is None:
+        fallback_id = AGENT_MODEL or next(iter(AVAILABLE_MODELS), "")
+        log.error(f"[router] model selection failed for task_class='{task_class}' — fallback '{fallback_id}'")
+        return {"id": fallback_id, "provider": "loc"}
+
+    return {"id": chosen["id"], "provider": chosen.get("provider", "loc")}
 
 
 # ---------------------------------------------------------------------------
