@@ -18,6 +18,7 @@ from ov_server import (
     Message,
     _VALID_SCOPES,
     _build_catalogue,
+    _detect_signal,
     _catalogue_cache,
     _discover_models,
     _discover_vlm_models,
@@ -1126,3 +1127,111 @@ class TestSetScope:
             resp = await ov_server.set_scope(req)
             assert resp.status_code == 200
             assert ov_server._cfg["provider_scope"] == scope
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _detect_signal()
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _make_req(messages, tools=None):
+    """Build a minimal ChatRequest for signal-detector tests."""
+    return ov_server.ChatRequest(messages=messages, tools=tools)
+
+
+def _user(text: str):
+    return ov_server.Message(role="user", content=text)
+
+
+def _assistant(text: str):
+    return ov_server.Message(role="assistant", content=text)
+
+
+def _image_msg():
+    part = ov_server.ContentPart(
+        type="image_url",
+        image_url={"url": "data:image/png;base64,abc"},
+    )
+    return ov_server.Message(role="user", content=[part])
+
+
+_ROUTER_CFG = {
+    "long_context_tokens": 100,
+    "keywords": {"web_search": ["search", "latest news"]},
+}
+
+
+class TestDetectSignal:
+    def test_no_signal_returns_none(self):
+        req = _make_req([_user("hello")])
+        with patch.dict(ov_server._cfg, {"router": _ROUTER_CFG}):
+            assert _detect_signal(req) is None
+
+    def test_image_returns_vision(self):
+        req = _make_req([_image_msg()])
+        with patch.dict(ov_server._cfg, {"router": _ROUTER_CFG}):
+            assert _detect_signal(req) == "vision"
+
+    def test_tools_returns_web_search(self):
+        req = _make_req([_user("what time is it")], tools=[{"type": "function"}])
+        with patch.dict(ov_server._cfg, {"router": _ROUTER_CFG}):
+            assert _detect_signal(req) == "web_search"
+
+    def test_long_context_returns_document(self):
+        long_text = "word " * 600          # ~600 words → ~150 tokens (char/4)
+        req = _make_req([_user(long_text)])
+        with patch.dict(ov_server._cfg, {"router": _ROUTER_CFG}):
+            assert _detect_signal(req) == "document"
+
+    def test_short_text_does_not_trigger_document(self):
+        req = _make_req([_user("brief question")])
+        with patch.dict(ov_server._cfg, {"router": _ROUTER_CFG}):
+            assert _detect_signal(req) != "document"
+
+    def test_keyword_match_returns_task_class(self):
+        req = _make_req([_user("search for the latest news on AI")])
+        with patch.dict(ov_server._cfg, {"router": _ROUTER_CFG}):
+            assert _detect_signal(req) == "web_search"
+
+    def test_keyword_case_insensitive(self):
+        req = _make_req([_user("SEARCH for something")])
+        with patch.dict(ov_server._cfg, {"router": _ROUTER_CFG}):
+            assert _detect_signal(req) == "web_search"
+
+    def test_keyword_checked_on_last_user_message_only(self):
+        msgs = [_user("search for news"), _assistant("ok"), _user("thanks")]
+        with patch.dict(ov_server._cfg, {"router": _ROUTER_CFG}):
+            assert _detect_signal(_make_req(msgs)) is None
+
+    def test_image_takes_priority_over_tools(self):
+        req = _make_req([_image_msg()], tools=[{"type": "function"}])
+        with patch.dict(ov_server._cfg, {"router": _ROUTER_CFG}):
+            assert _detect_signal(req) == "vision"
+
+    def test_tools_takes_priority_over_long_context(self):
+        long_text = "word " * 600
+        req = _make_req([_user(long_text)], tools=[{"type": "function"}])
+        with patch.dict(ov_server._cfg, {"router": _ROUTER_CFG}):
+            assert _detect_signal(req) == "web_search"
+
+    def test_long_context_takes_priority_over_keyword(self):
+        long_text = "search " * 600        # triggers both long_context and keyword
+        req = _make_req([_user(long_text)])
+        with patch.dict(ov_server._cfg, {"router": _ROUTER_CFG}):
+            assert _detect_signal(req) == "document"
+
+    def test_empty_keywords_list_no_match(self):
+        cfg = {"long_context_tokens": 100, "keywords": {"web_search": []}}
+        req = _make_req([_user("search the web")])
+        with patch.dict(ov_server._cfg, {"router": cfg}):
+            assert _detect_signal(req) is None
+
+    def test_no_messages_returns_none(self):
+        req = _make_req([])
+        with patch.dict(ov_server._cfg, {"router": _ROUTER_CFG}):
+            assert _detect_signal(req) is None
+
+    def test_multi_turn_long_context_cumulative(self):
+        # each message is short but combined they exceed threshold
+        msgs = [_user("word " * 80), _assistant("word " * 80), _user("word " * 80)]
+        with patch.dict(ov_server._cfg, {"router": {"long_context_tokens": 50, "keywords": {}}}):
+            assert _detect_signal(_make_req(msgs)) == "document"

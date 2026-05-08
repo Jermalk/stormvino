@@ -1024,6 +1024,48 @@ async def _refresh_catalogue(scope: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Signal detector — fast-path routing (O(1) / O(n_keywords), always <1 ms)
+# ---------------------------------------------------------------------------
+
+def _detect_signal(req: "ChatRequest") -> str | None:
+    """Return task_class name if a fast-path signal fires, else None.
+
+    Checked in priority order:
+      1. image content  → "vision"
+      2. client tools   → "web_search"
+      3. long context   → "document"
+      4. keyword match  → task_class from router.keywords
+    """
+    # 1. image
+    if _has_images(req.messages):
+        return "vision"
+
+    # 2. client-provided tools
+    if req.tools:
+        return "web_search"
+
+    # 3. long context — char/4 token estimate across all messages
+    router_cfg = _cfg.get("router", {})
+    threshold = router_cfg.get("long_context_tokens", 4000)
+    total_tokens = sum(len(_text_content(m)) for m in req.messages) // 4
+    if total_tokens > threshold:
+        return "document"
+
+    # 4. keyword match on last user message
+    last_user_text = next(
+        (_text_content(m) for m in reversed(req.messages) if m.role == "user"),
+        "",
+    )
+    if last_user_text:
+        text_lower = last_user_text.lower()
+        for task_class, keywords in router_cfg.get("keywords", {}).items():
+            if any(kw.lower() in text_lower for kw in keywords):
+                return task_class
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
 class ContentPart(BaseModel):
