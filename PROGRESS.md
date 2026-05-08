@@ -185,10 +185,20 @@
 
 ---
 
+### 2026-05-08 — Session 19 (baec765)
+**Working on:** CLAUDE.md framework repairs — SESSION.md recovery, DECISIONS.md write rule, dual line-limit clarification
+**Last commit:** baec765 — docs: fix DECISIONS.md underusage + clarify dual line limits in framework
+**Next action:** PLAN_routing.md Phase 2 Step 2.4 — wire routing into chat()
+**Blocked on:** nothing
+**Open questions:** (1) Embedding threshold 0.72 — tune after Phase 2 live. (2) OVH TTL 300s. (3) STT queued, lower priority.
+**Tests:** pass (170/170) — `make test`
+
+---
+
 ## NOW
 
-**Working on:** Phase 2 Step 2.3 complete — complexity_score() + _select_model()
-**Last commit:** (pending)
+**Working on:** Session 19 complete — CLAUDE.md framework repairs (SESSION.md, DECISIONS.md, line limits)
+**Last commit:** baec765 — docs: fix DECISIONS.md underusage + clarify dual line limits in framework
 **Next action:** PLAN_routing.md Phase 2 Step 2.4 — wire routing into chat()
 **Blocked on:** nothing
 **Open questions:** (1) Embedding threshold 0.72 — tune after Phase 2 live. (2) OVH TTL 300s. (3) STT queued, lower priority.

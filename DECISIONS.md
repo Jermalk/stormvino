@@ -2,6 +2,7 @@
 
 > Append-only. Never delete entries. Read only when user explicitly asks about a past decision.
 > Format: see CLAUDE.md § DECISIONS.md entry format.
+> **Write immediately when a decision is made — do not defer to session-wrap.**
 
 ---
 
@@ -228,3 +229,27 @@
 **Rationale:** A model that is the best option for any task class should be discoverable as "best" in the catalogue. "fast" is the floor, not a ceiling.
 **Rejected alternative:** First-match wins — order-dependent and surprising when the same model appears in multiple classes.
 **Affects:** `_tier_map_for_provider()`, `_local_catalogue()`, `_fetch_ovh_catalogue()`
+
+---
+
+### 2026-05-08 — SESSION.md as live crash-recovery snapshot
+**Decision:** Add `SESSION.md` as a live file overwritten on every commit and cleared (emptied) on clean session-wrap.
+**Rationale:** PROGRESS.md + SCRATCHPAD.md only capture state at wrap time; a mid-step crash left no recovery trail. SESSION.md is the only file that reflects in-progress state, making broken sessions recoverable without reading the full transcript.
+**Rejected alternative:** Rely on SCRATCHPAD.md alone — it is only written when context fills or the developer remembers, not on every commit.
+**Affects:** `CLAUDE.md` re-entry protocol, `#session-wrap` procedure, `SESSION.md` (new file)
+
+---
+
+### 2026-05-08 — DECISIONS.md write-immediately rule
+**Decision:** Decisions must be written to DECISIONS.md immediately when made, not deferred to session-wrap.
+**Rationale:** At session-wrap, context may be gone or summarised — deferred decisions are often lost or poorly captured. Writing in real time preserves accuracy and removes the "remember to record this" overhead.
+**Rejected alternative:** Park in SCRATCHPAD.md and migrate at wrap — too lossy in practice.
+**Affects:** `CLAUDE.md` DECISIONS.md section, `#session-wrap` step 3
+
+---
+
+### 2026-05-08 — Dual line-limit clarification in CLAUDE.md
+**Decision:** Separate the two line limits into named categories: "CLAUDE.md file budget" (290 soft / 320 hard, triggers extraction to CLAUDE-ref) and "context load budget" (800 lines of actively-loaded files, triggers SCRATCHPAD flush + session-end recommendation).
+**Rationale:** The two limits were co-located without explanation of what each governed, causing ambiguity about when to act and what counted. A table with explicit thresholds and actions eliminates the guesswork.
+**Rejected alternative:** Single combined limit — conflates file maintenance with context pressure.
+**Affects:** `CLAUDE.md` Context load discipline section
