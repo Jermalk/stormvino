@@ -3,6 +3,7 @@
     "device":                 "AUTO",
     "ov_cache_dir":           "/home/jerzy/.cache/ov_b60",
     "embedding_model":        "multilingual-e5-large-int8",
+    "embedding_device":       "GPU.0",
     "vision_model":           "qwen2.5-vl-7b-int4-ov",
     "model_aliases": {
         "qwen2.5-coder:14b":  "qwen2.5-coder-14b-int4"
@@ -44,8 +45,8 @@
     "model_kv_overrides": {},
 
     "assessor": {
-        "model":          "qwen3-8b-int4-ov",
-        "kv_cache_size_gb": 4
+        "model":          "",
+        "kv_cache_size_gb": 1
     },
 
     "router": {
@@ -98,7 +99,7 @@
             "description": "Search the web, find current events, retrieve live information",
             "signal":      "has_tools",
             "models": [
-                { "id": "qwen3-8b-int4-ov",        "provider": "loc", "tier": "fast" },
+                { "id": "qwen3-14b-int4-ov",       "provider": "loc", "tier": "fast" },
                 { "id": "Qwen3-32B",               "provider": "ovh", "tier": "best" }
             ]
         },
@@ -107,7 +108,7 @@
             "signal":      "long_context",
             "context_threshold_tokens": 4000,
             "models": [
-                { "id": "qwen3-8b-int4-ov",       "provider": "loc", "tier": "fast" },
+                { "id": "qwen3-14b-int4-ov",      "provider": "loc", "tier": "fast" },
                 { "id": "qwen3-14b-int4-ov",      "provider": "loc", "tier": "balanced" },
                 { "id": "Qwen3-32B",              "provider": "ovh", "tier": "fast" },
                 { "id": "gpt-oss-120b",           "provider": "ovh", "tier": "best" }
@@ -134,7 +135,7 @@
                 "jak zaplanować wakacje"
             ],
             "models": [
-                { "id": "qwen3-8b-int4-ov", "provider": "loc", "tier": "fast" },
+                { "id": "qwen3-14b-int4-ov","provider": "loc", "tier": "fast" },
                 { "id": "qwen3-14b-int4-ov","provider": "loc", "tier": "balanced" },
                 { "id": "Qwen3-32B",        "provider": "ovh", "tier": "best" }
             ]

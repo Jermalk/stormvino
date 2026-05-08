@@ -167,7 +167,7 @@ def _load_config() -> dict:
 
 _KNOWN_CONFIG_KEYS: frozenset[str] = frozenset({
     # hardware
-    "models_dir", "device", "ov_cache_dir", "embedding_model", "vision_model",
+    "models_dir", "device", "ov_cache_dir", "embedding_model", "embedding_device", "vision_model",
     "model_aliases", "max_loaded_models", "kv_cache_size_gb", "model_kv_overrides", "vram_headroom_gb",
     "max_ram_percent", "max_new_tokens_default", "vlm_max_image_turns",
     "vlm_max_image_side_px", "enable_prefix_caching", "max_num_batched_tokens",
@@ -695,9 +695,12 @@ async def get_embedding_model():
             check_memory()
             log.info("Loading embedding model...")
             loop = asyncio.get_running_loop()
+            emb_device = _cfg.get("embedding_device", DEVICE)
+            log.info(f"Loading embedding model on {emb_device}")
             emb_model = await loop.run_in_executor(
                 None,
-                partial(OVModelForFeatureExtraction.from_pretrained, EMBEDDING_MODEL_PATH)
+                partial(OVModelForFeatureExtraction.from_pretrained,
+                        EMBEDDING_MODEL_PATH, device=emb_device)
             )
             emb_tokenizer = await loop.run_in_executor(
                 None,
