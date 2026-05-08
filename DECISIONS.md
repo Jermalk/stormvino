@@ -253,3 +253,27 @@
 **Rationale:** The two limits were co-located without explanation of what each governed, causing ambiguity about when to act and what counted. A table with explicit thresholds and actions eliminates the guesswork.
 **Rejected alternative:** Single combined limit — conflates file maintenance with context pressure.
 **Affects:** `CLAUDE.md` Context load discipline section
+
+---
+
+### 2026-05-08 — ThinkStreamHandler buffer size: 7 chars
+**Decision:** Keep 7 chars buffered in `ThinkStreamHandler.feed()` look-ahead buffer (changed from 8 in plan).
+**Rationale:** `<think>` is 7 chars — the minimum to detect the opening tag across a token boundary. 8 was one char over-conservative; 7 is exact.
+**Rejected alternative:** 8 chars (plan default) — emits one extra char of unnecessary latency.
+**Affects:** `ThinkStreamHandler.feed()` in `ov_server.py`
+
+---
+
+### 2026-05-08 — Assessor pipe reuse for task execution
+**Decision:** When the task model selected by routing is the same as `assessor.model`, reuse `_assessor_pipe` directly for task execution instead of loading a second pipeline.
+**Rationale:** Prevents double-VRAM allocation when qwen3-8b is selected for both routing and task. Enabled by loading `_assessor_tokenizer` in `_load_assessor()`.
+**Rejected alternative:** Always call `get_model()` — would load a second qwen3-8b pipeline alongside the assessor, wasting ~8 GB VRAM.
+**Affects:** `_load_assessor()`, `chat()` pipe selection block, `_assessor_tokenizer` global
+
+---
+
+### 2026-05-08 — Routing prompt cache invalidated on scope change
+**Decision:** Clear `_routing_prompt_cache` when `/admin/scope` changes, alongside `_catalogue_cache`.
+**Rationale:** The system block filters models by scope — a stale cache entry would offer OVH models to the assessor even after switching to "local" scope, or vice versa.
+**Rejected alternative:** Let cache entries age out naturally — no TTL exists; stale entries would persist indefinitely.
+**Affects:** `set_scope()`, `_routing_prompt_cache`

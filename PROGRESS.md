@@ -195,11 +195,21 @@
 
 ---
 
+### 2026-05-08 — Session 20 (01bc6bd)
+**Working on:** Phase 2 (Steps 2.4–2.6) + Phase 3 (Steps 3.1–3.3) — all complete
+**Last commit:** 01bc6bd — feat: Step 3.3 — wire assessor into routing pipeline
+**Next action:** Phase 4 Step 4.1 — task graph executor OR tune/test routing live on server
+**Blocked on:** nothing
+**Open questions:** (1) Embedding threshold 0.72 — tune after live test. (2) Assessor JSON output quality — needs real-traffic validation. (3) STT queued, lower priority.
+**Tests:** pass (186/186)
+
+---
+
 ## NOW
 
-**Working on:** Session 19 complete — CLAUDE.md framework repairs (SESSION.md, DECISIONS.md, line limits)
-**Last commit:** baec765 — docs: fix DECISIONS.md underusage + clarify dual line limits in framework
-**Next action:** PLAN_routing.md Phase 2 Step 2.4 — wire routing into chat()
+**Working on:** Phase 3 complete — assessor wired in routing pipeline
+**Last commit:** 01bc6bd — feat: Step 3.3 — wire assessor into routing pipeline
+**Next action:** Phase 4 Step 4.1 — task graph executor (`_execute_task_graph`) in ov_server.py; OR live-test routing on running server first
 **Blocked on:** nothing
-**Open questions:** (1) Embedding threshold 0.72 — tune after Phase 2 live. (2) OVH TTL 300s. (3) STT queued, lower priority.
-**Tests:** pass (170/170) — `make test`
+**Open questions:** (1) Embedding threshold 0.72 — tune after live test. (2) Assessor JSON output quality — needs real-traffic validation. (3) STT queued.
+**Tests:** pass (186/186)

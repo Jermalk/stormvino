@@ -176,3 +176,61 @@ time curl -s http://localhost:11435/v1/messages \
   -d "{\"model\":\"qwen3-14b-int4-ov\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hi.\"}],\"system\":\"$SYSTEM\",\"max_tokens\":10,\"stream\":false}"
 # Cold: 39.5s, Warm (identical): 0.4s → 100x speedup confirmed
 ```
+
+### 2026-05-07 — Test suite bootstrap (65 tests, all pass)
+```
+source /home/jerzy/ov_env/bin/activate && python -m pytest
+# 65 passed, 2 warnings in 0.30s
+
+pip install pytest-watch --quiet
+
+make test       # run once
+make watch      # auto-rerun on .py changes (ptw)
+```
+
+### 2026-05-07 — Step 1.1 commit
+```
+git add config.json ov_server.py tests/conftest.py tests/test_pure.py pytest.ini Makefile
+git commit  # cd8d32a — feat: Step 1.1 — new config schema, _validate_config, 79-test suite
+```
+
+### 2026-05-08 — Step 2.4: tests + commit
+```
+make test          # 170/170 pass
+git add ov_server.py SESSION.md
+git commit         # b0e6792
+```
+
+### 2026-05-08 — Step 2.5: routing confidence/latency + ov-monitor
+```
+make test          # 170/170 pass
+git commit         # 15db100 (ov_server), 8e4d961 (ov_monitor)
+```
+
+### 2026-05-08 — Step 2.6: streaming fixes
+```
+python3 -m pytest tests/ -q    # 176/176 pass
+git add ov_server.py tests/test_pure.py
+git commit                      # 76b31ff
+```
+
+### 2026-05-08 — Step 3.1: assessor bootstrap
+```
+python3 -m pytest tests/ -q    # 176/176 pass
+git add ov_server.py
+git commit                      # 1fcc1c4
+```
+
+### 2026-05-08 — Step 3.2: assessor routing prompt
+```
+python3 -m pytest tests/ -q    # 186/186 pass
+git add ov_server.py tests/test_pure.py
+git commit                      # d9780f5
+```
+
+### 2026-05-08 — Step 3.3: assessor wired into routing
+```
+python3 -m pytest tests/ -q    # 186/186 pass
+git add ov_server.py
+git commit                      # 01bc6bd
+```

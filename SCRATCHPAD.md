@@ -3,6 +3,6 @@
 > Cleared at start of every session. Carry-over summary written as first entry.
 > Format: bullet points, max 5 lines per topic, no prose.
 
-## Carried over: Session 19 (2026-05-08) summary
+## Carried over: Session 20 (2026-05-08) summary
 
-Framework-only session — no routing code changed. Three CLAUDE.md repairs: (1) SESSION.md added as live crash-recovery snapshot (overwrite-per-commit, cleared at wrap, bootstrap guard checks on re-entry); (2) DECISIONS.md write-immediately rule added — decisions no longer deferred to session-wrap; (3) dual line limits separated into named table: CLAUDE.md file budget (290/320 lines) vs context load budget (800 loaded-file lines). Tests unchanged at 170/170. Next session opens Phase 2 Step 2.4 — wire _detect_signal → _route_by_embedding → _select_model into chat().
+Phase 2 + Phase 3 complete in one session. Phase 2: routing wired into chat() (Step 2.4), routing decision with confidence/latency in /health + ov-monitor Last route row (Step 2.5), ThinkStreamHandler + usage chunk + StreamingToolCallHandler stub (Step 2.6). Phase 3: assessor LLMPipeline bootstrapped at startup (Step 3.1), routing prompt builder with per-(scope,profile) prefix-cacheable system block (Step 3.2), assessor wired into Stage 3 routing with pipe reuse when task model == assessor model (Step 3.3). Tests: 186/186. Next: Phase 4 Step 4.1 (task graph executor) OR live routing validation on running server.
