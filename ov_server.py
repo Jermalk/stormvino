@@ -169,6 +169,8 @@ _KNOWN_CONFIG_KEYS: frozenset[str] = frozenset({
     "profiles", "task_classes", "postgres_dsn",
     # legacy compat — tolerated without warning until Step 2.4
     "default_model", "agent_model", "max_new_tokens_agent", "routing",
+    # safety
+    "blocked_models",
 })
 
 
@@ -1811,6 +1813,10 @@ async def chat(req: ChatRequest):
     _route_task_class: str | None = None
     _route_strategy: str | None = None
     _route_query_embedding: list | None = None
+
+    _blocked: list[str] = _cfg.get("blocked_models", [])
+    if req.model in _blocked:
+        raise HTTPException(status_code=400, detail=f"Model '{req.model}' is blocked on this server.")
 
     if req.model not in ROUTING_TRIGGER_MODELS and req.model in AVAILABLE_MODELS:
         # Explicit local model — bypass routing
