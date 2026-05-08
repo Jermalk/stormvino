@@ -234,3 +234,9 @@ python3 -m pytest tests/ -q    # 186/186 pass
 git add ov_server.py
 git commit                      # 01bc6bd
 ```
+
+## 2026-05-08 12:19 — Drop 30B local models, fix assessor
+```
+# Removed from config.json: qwen3-8b-int4-ov (broken), qwen3-30b-a3b-int4-ov (broken), qwen3-coder-30b-a3b-int4-ov
+# assessor.model: qwen3-14b-int4-ov (confirmed working, pipe reused for general/web_search/document)
+```

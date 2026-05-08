@@ -33,9 +33,12 @@
         }
     },
 
+    "default_model": "qwen2.5-coder-14b-int4",
+    "agent_model":   "qwen2.5-coder-14b-int4",
+
     "assessor": {
         "model":          "qwen3-8b-int4-ov",
-        "kv_cache_size_gb": 2
+        "kv_cache_size_gb": 6
     },
 
     "router": {
