@@ -11,3 +11,4 @@ models/
 
 # environment files
 .env
+ov_cache/

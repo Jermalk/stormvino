@@ -1,7 +1,7 @@
 {
     "models_dir":             "/opt/ov_server/models",
     "device":                 "AUTO",
-    "ov_cache_dir":           "/home/jerzy/.cache/ov_b60",
+    "ov_cache_dir":           "/opt/ov_server/ov_cache",
     "embedding_model":        "multilingual-e5-large-int8",
     "embedding_device":       "GPU.0",
     "vision_model":           "qwen2.5-vl-7b-int4-ov",
