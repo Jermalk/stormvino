@@ -225,11 +225,21 @@
 
 ---
 
+### 2026-05-08 — Session 23 (4e80e9b)
+**Working on:** qwen3-14b re-conversion, KV_CACHE_PRECISION=u8 removal, @agent routing fix, plans/autotest moved into repo.
+**Last commit:** 4e80e9b — fix: exclude system messages from long_context token estimate
+**Next action:** Decide whether phi-4 should still be agent_model/preloaded at startup — with qwen3-14b available, reconsider default_model, agent_model, and startup warm model (ov_server.py `_warm_model` call at startup + config.json).
+**Blocked on:** nothing
+**Open questions:** (1) phi-4 preloads at startup as agent_model — user flagged as unnecessary now that qwen3-14b is available. (2) STT Phase 1 still queued. (3) Embedding threshold 0.72 needs live tuning. (4) `test_long_context_returns_document` test still counts all messages — may need updating to match new behaviour.
+**Tests:** pass (176/176)
+
+---
+
 ## NOW
 
-**Working on:** System stable — all fixes from today's session committed.
-**Last commit:** 03b85f9 — fix: set default_model/agent_model to coder-14b, raise assessor KV to 6GB
-**Next action:** Fresh download of qwen3-14b-int4-ov when ready (see MODELS.md for conversion guide). Or start STT Phase 1 (see FUTURE_PLAN.md).
+**Working on:** phi-4 startup preload review — should agent_model/default_model change now that qwen3-14b is live?
+**Last commit:** 4e80e9b — fix: exclude system messages from long_context token estimate
+**Next action:** Read config.json and ov_server.py startup preload logic (~line 1505); decide what default_model and agent_model should be; update config and test.
 **Blocked on:** nothing
-**Open questions:** (1) qwen3-14b IR incompatible — needs re-download from HuggingFace. (2) STT Phase 1 still queued. (3) Embedding threshold 0.72 needs live tuning.
+**Open questions:** (1) phi-4 preloads at startup as agent_model — unnecessary now qwen3-14b available? (2) STT Phase 1 still queued. (3) Embedding threshold 0.72 needs live tuning.
 **Tests:** pass (176/176)

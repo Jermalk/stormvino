@@ -3,20 +3,15 @@
 > Cleared at start of every session. Carry-over summary written as first entry.
 > Format: bullet points, max 5 lines per topic, no prose.
 
-## Session 22 wrap — stable architecture (2026-05-08)
+## Session 23 wrap — qwen3-14b live, routing fixes (2026-05-08)
 
-Session fixed two config bugs: (1) missing `default_model` caused 30B preload after tool_calls,
-(2) assessor 2GB KV blob was unstable — raised to 6GB (uses cached blob from get_model path).
-qwen3-14b dropped permanently from routing — IR incompatible with OV 2026.1.0. System now clean.
+- Dropped KV_CACHE_PRECISION=u8 — all local IRs fail fresh compile on OV 2026.1.0; affects qwen3-8b, phi-4, qwen3-14b
+- qwen3-14b re-converted: must use `--task text-generation-with-past`; `text-generation` → stateless → SDPAToPagedAttention crash
+- Conversion venv: `/tmp/convert_env` with separate optimum stack; never use production venv for conversion
+- @agent long_context false positive fixed: system messages excluded from token count (AnythingLLM injects huge system prompt)
+- plans/ and autotest/ moved into /opt/ov_server/ and committed to git
 
-## Current model lineup
-- Assessor: qwen3-8b-int4-ov (6GB KV) — loads in ~4.5s from blob, pipe reused for fast-tier tasks
-- Code fast: qwen2.5-coder-14b-int4 (6GB KV) — preloaded at startup (default_model + agent_model)
-- Vision: qwen2.5-vl-7b-int4-ov
-- Embeddings: multilingual-e5-large-int8
-- OVH best: Qwen3-32B (general/web_search/document), Qwen3-Coder-480B-A35B (code)
-- qwen3-14b: ON DISK but broken (IR incompatible with OV 2026.1.0 + u8 KV precision) — needs re-download
-
-## Postgres observability
-- NULL task_class/strategy/confidence is EXPECTED for explicit-model requests
-- Router only fires (and records) when routing trigger model names are used (e.g. claude-sonnet-4-6)
+## Pending issue — phi-4 startup preload
+- phi-4 is `agent_model` + `default_model` → preloads at startup via `_warm_model()`
+- Now that qwen3-14b is available, reconsider: qwen3-14b is better for general/document, phi-4 was chosen when 14b was broken
+- Next session: read startup preload logic (~line 1505 ov_server.py), decide new agent_model/default_model, update config.json

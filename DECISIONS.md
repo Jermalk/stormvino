@@ -293,3 +293,27 @@
 **Rationale:** Without `default_model`, `DEFAULT_MODEL` fell back to alphabetically last model (`qwen3-coder-30b`) causing 30B load as speculative preload after every `tool_calls` response. Assessor 2GB KV blob was unstable (fresh compile occasionally fails); 6GB KV uses the same blob compiled by `get_model()` and is reliably cached.
 **Rejected alternative:** Keep 2GB assessor KV — unreliable blob compilation causes intermittent startup failures.
 **Affects:** config.json `default_model`, `agent_model`, `assessor.kv_cache_size_gb`
+
+---
+
+### 2026-05-08 — drop KV_CACHE_PRECISION=u8 globally
+**Decision:** Remove `KV_CACHE_PRECISION: u8` from server CONFIG dict.
+**Rationale:** All locally-exported/sourced model IRs fail fresh compilation under OV 2026.1.0 with u8 KV precision (`m_element_type.is_static()`). Models loaded from stale cached blobs silently, masking the incompatibility. Removing u8 halves token capacity per KV GB but all models still cover their training context at configured budgets (see plans/20260508_model_conversion_guide.md).
+**Rejected alternative:** Re-export all models — only qwen3-14b was re-exported; qwen3-8b and phi-4 use official HF OV IRs that also fail u8 fresh compile on OV 2026.1.0.
+**Affects:** ov_server.py CONFIG dict
+
+---
+
+### 2026-05-08 — qwen3-14b re-converted with text-generation-with-past
+**Decision:** Re-export qwen3-14b using `--task text-generation-with-past` (not `text-generation`).
+**Rationale:** `text-generation` produces a stateless model rejected by `openvino_genai` at load time (`SDPAToPagedAttention` requires stateful model). `text-generation-with-past` is mandatory for all LLMs used with `LLMPipeline`. Documented in plans/20260508_model_conversion_guide.md.
+**Rejected alternative:** Use official OpenVINO/Qwen3-14B-int4-ov — does not exist on HuggingFace as of 2026-05-08; only int8 and fp16 are published.
+**Affects:** models/qwen3-14b-int4-ov/
+
+---
+
+### 2026-05-08 — exclude system messages from long_context token estimate
+**Decision:** In `_detect_signal()`, count only user+assistant messages toward the long_context threshold, not system messages.
+**Rationale:** AnythingLLM @agent injects thousands of tokens of tool descriptions into the system prompt, causing every @agent request to trip the 4000-token gate and route to document/phi-4, evicting whatever was loaded. System prompts are application boilerplate, not user content. Long user documents appear in user messages.
+**Rejected alternative:** Raise the threshold — would break legitimate long-document detection.
+**Affects:** ov_server.py `_detect_signal()`
