@@ -17,6 +17,19 @@ log = logging.getLogger("ov_server.db")
 _pool = None   # asyncpg.Pool | None
 
 
+async def _init_conn(conn) -> None:
+    """Per-connection init: register JSONB codec and pgvector type."""
+    import json as _json
+    from pgvector.asyncpg import register_vector
+    await conn.set_type_codec(
+        "jsonb",
+        encoder=_json.dumps,
+        decoder=_json.loads,
+        schema="pg_catalog",
+    )
+    await register_vector(conn)
+
+
 async def init_pool(dsn: str | None) -> None:
     """Open connection pool. Noop if dsn is None."""
     global _pool
@@ -25,10 +38,7 @@ async def init_pool(dsn: str | None) -> None:
         return
     try:
         import asyncpg
-        from pgvector.asyncpg import register_vector
-        _pool = await asyncpg.create_pool(dsn, min_size=1, max_size=4)
-        async with _pool.acquire() as conn:
-            await register_vector(conn)
+        _pool = await asyncpg.create_pool(dsn, min_size=1, max_size=4, init=_init_conn)
         log.info(f"Observability DB connected: {dsn}")
     except Exception as exc:
         log.warning(f"Observability DB unavailable — inference unaffected: {exc}")
@@ -72,11 +82,9 @@ async def _write_inference_event(
     if _pool is None:
         return
     try:
-        from pgvector.asyncpg import register_vector
         import numpy as np
         emb = np.array(query_embedding, dtype=np.float32) if query_embedding else None
         async with _pool.acquire() as conn:
-            await register_vector(conn)
             await conn.execute(
                 """
                 INSERT INTO inference_events (
@@ -133,11 +141,9 @@ async def _write_centroid_snapshot(
     if _pool is None:
         return
     try:
-        from pgvector.asyncpg import register_vector
         import numpy as np
         vec = np.array(centroid, dtype=np.float32)
         async with _pool.acquire() as conn:
-            await register_vector(conn)
             await conn.execute(
                 """
                 INSERT INTO routing_centroids (commit, task_class, centroid, example_count)
