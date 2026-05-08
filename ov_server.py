@@ -323,6 +323,8 @@ _active_profile: str = _cfg.get("active_profile", "fast")
 _profile_switching: bool = False
 _profile_lock = asyncio.Lock()
 _last_routing_decision: dict | None = None
+_assessor_pipe: "ov_genai.LLMPipeline | None" = None
+_assessor_lock = asyncio.Lock()
 
 COMPLEXITY_SIGNALS: tuple[str, ...] = (
     "analyze", "compare", "explain in detail", "evaluate", "critique",
@@ -1165,6 +1167,51 @@ async def _load_embedding_centroids() -> None:
         _task_class_embeddings = {}
 
 
+async def _load_assessor() -> None:
+    """Load the assessor LLMPipeline as a background task after centroid computation.
+
+    Not added to loaded_models — excluded from LRU eviction and MAX_LOADED_MODELS cap.
+    VRAM tracked under '_assessor' key in _vram_allocated so vram_free_gb() stays accurate.
+    """
+    global _assessor_pipe
+    assessor_cfg = _cfg.get("assessor", {})
+    model_id = assessor_cfg.get("model", "")
+    if not model_id:
+        log.info("[assessor] no assessor.model configured — skipped")
+        return
+    if model_id not in AVAILABLE_MODELS:
+        log.warning(f"[assessor] model '{model_id}' not on disk — skipped")
+        return
+
+    kv_gb = assessor_cfg.get("kv_cache_size_gb", 2)
+    sched = ov_genai.SchedulerConfig()
+    sched.cache_size = kv_gb
+    sched.enable_prefix_caching = _cfg.get("enable_prefix_caching", True)
+    sched.max_num_batched_tokens = _cfg.get("max_num_batched_tokens", 4096)
+
+    weights_gb = model_size_gb(model_id)
+    log.info(f"[assessor] loading '{model_id}' (~{weights_gb:.1f}GB weights + {kv_gb}GB KV)...")
+    start = time.time()
+    try:
+        loop = asyncio.get_running_loop()
+        pipe = await loop.run_in_executor(
+            None,
+            partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
+                    scheduler_config=sched, **CONFIG)
+        )
+    except Exception as exc:
+        log.error(f"[assessor] failed to load '{model_id}': {exc}")
+        return
+
+    elapsed = time.time() - start
+    _assessor_pipe = pipe
+    _vram_allocated["_assessor"] = weights_gb + kv_gb
+    log.info(
+        f"[assessor] loaded '{model_id}' in {elapsed:.1f}s"
+        f" | VRAM ~{_vram_allocated['_assessor']:.1f}GB"
+    )
+
+
 def _route_by_embedding(query: str) -> "tuple[str, float]":
     """Return (task_class, cosine_similarity) for the best-matching task class.
     Returns ('general', 0.0) when embeddings are unavailable."""
@@ -1313,7 +1360,8 @@ class ScopeRequest(BaseModel):
 # ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def _startup_preload() -> None:
-    await _load_embedding_centroids()
+    await _load_embedding_centroids()           # blocking — centroids before assessor
+    asyncio.create_task(_load_assessor())       # background — assessor pipeline
     if AGENT_MODEL:
         log.info(f"Scheduling startup preload of agent model '{AGENT_MODEL}'")
         asyncio.create_task(_warm_model(AGENT_MODEL))
@@ -1337,6 +1385,7 @@ async def health():
         "loaded_models":     list(loaded_models.keys()),
         "loaded_vlm_models": list(loaded_vlm_models.keys()),
         "embedding_loaded":  emb_model is not None,
+        "assessor_loaded":   _assessor_pipe is not None,
         "vram_total_gb":     round(_TOTAL_VRAM_GB, 2) if _TOTAL_VRAM_GB else None,
         "vram_allocated_gb": {k: round(v, 2) for k, v in _vram_allocated.items()},
         "vram_free_gb":      round(vram_free_gb(), 2) if vram_free_gb() is not None else None,
