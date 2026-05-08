@@ -238,7 +238,6 @@ DEVICE             = _cfg["device"]
 CONFIG             = {
     "PERFORMANCE_HINT":                "LATENCY",
     "CACHE_DIR":                       _cfg["ov_cache_dir"],
-    "KV_CACHE_PRECISION":              "u8",
     "DYNAMIC_QUANTIZATION_GROUP_SIZE": "32",
 }
 def _model_kv_gb(model_id: str) -> int:
