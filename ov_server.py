@@ -1841,6 +1841,8 @@ async def chat(req: ChatRequest):
 
         _route_task_class = task_class
         _route_strategy = strategy
+        if strategy == "rule":
+            _route_confidence = 1.0
         cplx = complexity_score(req)
         model_entry = _select_model(task_class, active_profile_cfg, cplx)
         model_id = model_entry["id"]
@@ -2069,7 +2071,7 @@ async def chat(req: ChatRequest):
                     prompt_tokens=prompt_tokens, completion_tokens=ct,
                     tok_per_sec=round(tok_per_sec, 2), elapsed_sec=round(elapsed, 2),
                     query_embedding=_route_query_embedding,
-                    meta={"stream": True},
+                    meta={"stream": True, "finish_reason": "stop"},
                 )
 
         async def full_stream():
