@@ -277,3 +277,11 @@
 **Rationale:** The system block filters models by scope — a stale cache entry would offer OVH models to the assessor even after switching to "local" scope, or vice versa.
 **Rejected alternative:** Let cache entries age out naturally — no TTL exists; stale entries would persist indefinitely.
 **Affects:** `set_scope()`, `_routing_prompt_cache`
+
+---
+
+### 2026-05-08 — qwen3-8b confirmed as correct assessor; 30B models dropped from local
+**Decision:** Restore assessor = qwen3-8b-int4-ov (2GB KV). Remove all 30B models from local task_classes permanently (not deferred). Raise task-model kv_cache_size_gb from 4→6 GB.
+**Rationale:** SCRATCHPAD "qwen3-8b broken" was stale — the KV mismatch was already fixed in f31cf3f. qwen3-8b at 105 t/s is the right assessor (DECISIONS 2026-05-07). Without 30B models: assessor 7.5GB + task-14b 13.7GB = 21.2GB, 3.3GB headroom — fits cleanly. 6GB KV gives 14b models ~20k token context vs 4GB's ~13k.
+**Rejected alternative:** qwen3-14b as assessor — overkill for routing (~7s vs ~1s), blocks 6GB KV for task models.
+**Affects:** config.json assessor block, kv_cache_size_gb, all task_classes

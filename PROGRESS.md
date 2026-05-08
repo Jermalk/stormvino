@@ -217,9 +217,9 @@
 
 ## NOW
 
-**Working on:** Model replacement — qwen3-8b (assessor) and qwen3-30b still self-converted, break on fresh OV 2026.1.0 compile.
-**Last commit:** 91a4d28 — feat: per-model KV override + assessor KV→1GB for 30B model support
-**Next action:** Read SCRATCHPAD.md "Fix commands" — swap 30B dir first (official is in -bak), then download official qwen3-8b
+**Working on:** Restored correct assessor architecture: qwen3-8b (2GB KV), task models at 6GB KV, 30B local dropped permanently.
+**Last commit:** a525376 — fix: restore qwen3-8b assessor, raise task KV to 6GB, drop 30B local
+**Next action:** Restart server — assessor will recompile 2GB KV blob (~5-10 min first startup). Verify `assessor_loaded: true` in /health. Then test chat routing.
 **Blocked on:** nothing
-**Open questions:** (1) Official HF name for qwen3-8b OV release. (2) Accept 2GB KV for 30B or push to OVH?
+**Open questions:** If 6GB task KV causes OOM on coder-14b, drop to 5GB (retry logic already in code via a04cb8b).
 **Tests:** pass (176/176)
