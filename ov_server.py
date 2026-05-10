@@ -89,6 +89,7 @@ from server_config import (
     _model_kv_gb, get_scheduler_config,
 )
 import model_manager
+import catalogue
 
 # --- State ---
 _task_class_embeddings: "dict[str, np.ndarray] | None" = None  # None=not loaded, {}=failed
@@ -286,143 +287,6 @@ async def _apply_profile(name: str) -> None:
             _profile_switching = False
 
 
-# ---------------------------------------------------------------------------
-# Model catalogue — merged local + remote model list with TTL caching.
-#
-# _build_catalogue(scope) is synchronous so it can be called from anywhere
-# and tested without an event loop.  Remote providers are served from the
-# cache; call _refresh_catalogue(scope) from an async context first to
-# guarantee freshness.
-# ---------------------------------------------------------------------------
-_catalogue_cache: dict[str, tuple[list[dict], float]] = {}
-# keyed by provider name ("ovh"), value is (entries, fetched_at_timestamp)
-
-
-def _tier_map_for_provider(provider: str) -> dict[str, str]:
-    """Return {model_id: tier} for the given provider, derived from task_classes.
-    A model appearing in multiple classes gets the highest tier found ("best" > "fast")."""
-    result: dict[str, str] = {}
-    for cls_cfg in _cfg.get("task_classes", {}).values():
-        for m in cls_cfg.get("models", []):
-            if m.get("provider") == provider:
-                mid = m["id"]
-                if m.get("tier") == "best" or result.get(mid) == "best":
-                    result[mid] = "best"
-                else:
-                    result.setdefault(mid, "fast")
-    return result
-
-
-def _local_catalogue() -> list[dict]:
-    """Catalogue entries for locally discovered LLM and VLM models."""
-    tier_map = _tier_map_for_provider("loc")
-    entries: list[dict] = []
-    for mid in AVAILABLE_MODELS:
-        entries.append({
-            "id":             mid,
-            "object":         "model",
-            "provider":       "loc",
-            "tier":           tier_map.get(mid, "fast"),
-            "context_length": None,
-            "pricing":        None,
-            "loaded":         mid in model_manager.loaded_models,
-        })
-    for mid in AVAILABLE_VLM_MODELS:
-        entries.append({
-            "id":             mid,
-            "object":         "model",
-            "provider":       "loc",
-            "tier":           tier_map.get(mid, "fast"),
-            "context_length": None,
-            "pricing":        None,
-            "loaded":         mid in model_manager.loaded_vlm_models,
-        })
-    return entries
-
-
-async def _fetch_ovh_catalogue(spec: dict) -> list[dict]:
-    """Fetch OVH /v1/models, update _catalogue_cache["ovh"], and return the result.
-    On any error returns the existing cached entries (empty list if no prior fetch)."""
-    ttl = spec.get("catalogue_ttl_sec", 300)
-    cached_entries, fetched_at = _catalogue_cache.get("ovh", ([], 0.0))
-    if cached_entries and (time.time() - fetched_at) < ttl:
-        return cached_entries
-
-    base_url = spec.get("base_url", "").rstrip("/")
-    api_key  = os.environ.get(spec.get("api_key_env", ""), "")
-    headers  = {"Authorization": f"Bearer {api_key}"}
-    ovh_tier = _tier_map_for_provider("ovh")
-
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(f"{base_url}/models", headers=headers)
-            resp.raise_for_status()
-            raw: list[dict] = resp.json().get("data", [])
-
-        entries: list[dict] = []
-        for m in raw:
-            mid = m.get("id", "")
-            if not mid:
-                continue
-            entries.append({
-                "id":             mid,
-                "object":         "model",
-                "provider":       "ovh",
-                "tier":           ovh_tier.get(mid, "best"),
-                "context_length": m.get("context_length") or m.get("context_window"),
-                "pricing":        None,
-                "loaded":         False,
-            })
-
-        _catalogue_cache["ovh"] = (entries, time.time())
-        log.info(f"[catalogue] OVH: fetched {len(entries)} models")
-        return entries
-
-    except Exception as exc:
-        suffix = " — using cached result" if cached_entries else " — skipping provider"
-        log.warning(f"[catalogue] OVH fetch failed: {exc}{suffix}")
-        return cached_entries
-
-
-def _scope_includes(scope: str, provider: str) -> bool:
-    """True if *provider* is active under *scope*.
-    scope values: "local" | "local+ovh" | "all".
-    "all" activates every provider defined in config.providers."""
-    if scope == "all":
-        return provider in _cfg.get("providers", {})
-    return provider in scope
-
-
-_AUTO_ENTRY: dict = {
-    "id":             "Auto",
-    "object":         "model",
-    "owned_by":       "ov-server",
-    "provider":       "loc",
-    "tier":           "auto",
-    "context_length": None,
-    "pricing":        None,
-    "loaded":         True,
-    "description":    "Automatic routing — server selects the best model for each request",
-}
-
-
-def _build_catalogue(scope: str) -> list[dict]:
-    """Return merged model list for *scope*.
-    Remote entries come from _catalogue_cache — call _refresh_catalogue() first
-    if you need guaranteed-fresh data."""
-    entries = [_AUTO_ENTRY] + _local_catalogue()
-    if _scope_includes(scope, "ovh"):
-        cached_entries, _ = _catalogue_cache.get("ovh", ([], 0.0))
-        entries.extend(cached_entries)
-    return entries
-
-
-async def _refresh_catalogue(scope: str) -> None:
-    """Trigger async refresh of remote catalogues whose TTL has expired."""
-    providers = _cfg.get("providers", {})
-    if _scope_includes(scope, "ovh") and "ovh" in providers:
-        await _fetch_ovh_catalogue(providers["ovh"])
-
 
 # ---------------------------------------------------------------------------
 # Signal detector — fast-path routing (O(1) / O(n_keywords), always <1 ms)
@@ -585,7 +449,7 @@ def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
     # Filter by scope, availability, and context limit
     available: list[dict] = []
     for m in all_models:
-        if not _scope_includes(scope, m.get("provider", "loc")):
+        if not catalogue._scope_includes(scope, m.get("provider", "loc")):
             continue
         if m.get("provider") == "loc" and m["id"] not in AVAILABLE_MODELS and m["id"] not in AVAILABLE_VLM_MODELS:
             log.warning(f"[router] '{m['id']}' not on disk — skipped (task_class='{task_class}')")
@@ -781,7 +645,7 @@ async def set_scope(req: ScopeRequest) -> JSONResponse:
             detail=f"Invalid scope '{req.scope}'. Valid values: {sorted(_VALID_SCOPES)}",
         )
     _cfg["provider_scope"] = req.scope
-    _catalogue_cache.clear()
+    catalogue._catalogue_cache.clear()
     _routing_prompt_cache.clear()  # scope change invalidates cached system blocks
     return JSONResponse(status_code=200, content={"scope": req.scope})
 
@@ -789,8 +653,8 @@ async def set_scope(req: ScopeRequest) -> JSONResponse:
 @app.get("/v1/models")
 async def list_models():
     scope = _cfg.get("provider_scope", "local")
-    await _refresh_catalogue(scope)
-    return {"object": "list", "data": _build_catalogue(scope)}
+    await catalogue._refresh_catalogue(scope)
+    return {"object": "list", "data": catalogue._build_catalogue(scope)}
 
 
 async def _chat_vlm(req: ChatRequest):
@@ -1004,7 +868,7 @@ async def chat(req: ChatRequest):
     # Explicit OVH model: client named a model from the OVH catalogue directly.
     # Proxy it immediately — do not run task-class routing.
     if req.model not in ROUTING_TRIGGER_MODELS and req.model not in AVAILABLE_MODELS:
-        _ovh_entries, _ = _catalogue_cache.get("ovh", ([], 0.0))
+        _ovh_entries, _ = catalogue._catalogue_cache.get("ovh", ([], 0.0))
         if any(e["id"] == req.model for e in _ovh_entries):
             backends = _cfg.get("routing", {}).get("backends", {})
             ovh_spec = backends.get("ovh")
