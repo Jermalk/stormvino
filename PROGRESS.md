@@ -275,11 +275,21 @@
 
 ---
 
-## NOW
-
-**Working on:** Module split — all 6 steps complete
-**Last commit:** a11b2d5 — refactor: Step 6 — final tidy (alias removal, CLAUDE.md update)
+### 2026-05-10 — Session 28 (af6d74e)
+**Working on:** Mistral Small 3.2 24B conversion, tool-call support, automated web search test
+**Last commit:** af6d74e — feat: Mistral tool-call support — _build_mistral_tool_prompt + dual-format parser
 **Next action:** n8n AI Agent node validation (tool call loop); or VRAM bar overcount fix in ov_monitor; or STT Phase 1
 **Blocked on:** nothing
-**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor.
-**Tests:** pass — /health OK, routing, streaming, non-streaming all verified
+**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor. (4) Mistral at tier="balanced" — consider promoting to tier="fast" once more traffic validates tool calling.
+**Tests:** pass — 4/4 on both qwen3-14b and mistral-small-3.2-24b (tool call generation + full tool loop)
+
+---
+
+## NOW
+
+**Working on:** Mistral tool-call support complete; web search autotest 4/4 both models
+**Last commit:** af6d74e — feat: Mistral tool-call support — _build_mistral_tool_prompt + dual-format parser
+**Next action:** n8n AI Agent node validation (tool call loop); or VRAM bar overcount fix in ov_monitor; or STT Phase 1
+**Blocked on:** nothing
+**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor. (4) Mistral tier="balanced" — promote to tier="fast" after real-traffic validation?
+**Tests:** pass — 4/4 qwen3-14b + 4/4 mistral-small-3.2-24b (autotest/test_web_search.py)

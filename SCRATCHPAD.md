@@ -4,4 +4,4 @@
 > Format: bullet points, max 5 lines per topic, no prose.
 
 ## Carried over:
-Session 27 completed the ov_server.py module split (Steps 4–6). catalogue.py, router.py extracted; _has_images alias removed; CLAUDE.md and CONVENTIONS.md updated with new module map. All routing verified working: embedding strategy, task_class=general, confidence=0.90. Server healthy, models loading normally. Next: n8n AI Agent validation, VRAM bar overcount fix, or STT Phase 1 — user decides.
+Session 28: converted mistral-small-3.2-24b-int4-ov (text-only anthracite-core strip, INT4 sym group-128). Fixed load failure (AUTO → GPU.1 in config.json). Added Mistral tool support in prompt_builder.py: _is_mistral_template() detects [SYSTEM_PROMPT] template, _build_mistral_tool_prompt() injects [AVAILABLE_TOOLS]/[TOOL_RESULTS], parse_tool_calls() extended to handle function_name{json} format. Automated test autotest/test_web_search.py: 4/4 both models. Mistral stays at tier="balanced" (not selected in fast profile) pending real-traffic validation.
