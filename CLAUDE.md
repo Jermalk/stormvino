@@ -67,10 +67,14 @@ FastAPI server exposing an OpenAI-compatible REST API (`/v1/chat/completions`, `
 |---|---|---|
 | HTTP server | FastAPI + Uvicorn | Single-worker, `asyncio` loop |
 | LLM inference | `openvino_genai.LLMPipeline` | Blocking; offloaded to executor |
-| Prompt building | `build_chatml()` | Manual ChatML — **no tool call support yet** |
-| Streaming | `AsyncTokenStreamer` | Subclass of `ov_genai.StreamerBase`; event loop captured at construction |
-| Embeddings | `OVModelForFeatureExtraction` (optimum-intel) | Mean-pooled, L2-normalised |
-| Models | `qwen3-8b-int4-ov`, `qwen3-14b-int4-ov`, `qwen2.5-vl-7b-int4-ov` | Up to 2 loaded; LRU eviction with VRAM check |
+| Prompt building | `prompt_builder.py` | `build_prompt()`, `build_vlm_prompt()`, tool-call parser, streaming handler |
+| Streaming | `AsyncTokenStreamer` (model_manager) | Subclass of `ov_genai.StreamerBase`; event loop captured at construction |
+| Embeddings | `OVModelForFeatureExtraction` (optimum-intel) | Mean-pooled, L2-normalised; lives in `model_manager.py` |
+| Routing | `router.py` | Signal detection → embedding similarity → model selection |
+| Model catalogue | `catalogue.py` | Local discovery + OVH remote fetch with TTL cache |
+| Model lifecycle | `model_manager.py` | Loaded models, VRAM tracking, LRU eviction, assessor |
+| Config/discovery | `server_config.py` | Config loading, model discovery, startup constants |
+| Models | `qwen3-8b-int4-ov`, `qwen3-14b-int4-ov`, `qwen2.5-vl-7b-int4-ov` | Up to 2 LLMs loaded; LRU eviction with VRAM check |
 
 **Entry point:** `/opt/ov_server/ov_server.py`
 **Config file:** `/opt/ov_server/config.json`
@@ -241,7 +245,12 @@ On re-entry: if non-empty, read aloud and ask user before proceeding (bootstrap 
 
 | File | Purpose |
 |---|---|
-| `ov_server.py` | Single-file server — keep it that way unless a module exceeds ~200 lines of distinct concern |
+| `ov_server.py` | FastAPI app, endpoints, middleware, profile switching, image helpers |
+| `server_config.py` | Config loading, model discovery, startup constants, resolved-model helpers |
+| `model_manager.py` | Model lifecycle state, VRAM tracking, LRU eviction, AsyncTokenStreamer, assessor |
+| `catalogue.py` | Model catalogue: local discovery + OVH remote fetch with TTL cache |
+| `router.py` | Routing logic: signal detection, embedding similarity, model selection |
+| `prompt_builder.py` | Prompt building, tool-call parsing, streaming think-block handler |
 | `config.json` | Runtime config: models_dir, device, model names, limits. Falls back to defaults if absent. |
 | `coding_standards_python.json` | Python typing and clean-code standards. 1st-order rules are inlined above; load this file only for 2nd-order techniques (TypedDict, TypeAlias, Protocol, TypeVar). |
 | `CONVENTIONS.md` | Machine-facing coding conventions for AI tools (Aider, Qwen, etc.). Module map, import rules, how-to recipes. Keep in sync with CLAUDE.md when modules change. |

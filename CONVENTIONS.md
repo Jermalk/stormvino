@@ -78,7 +78,7 @@ model = model_manager.emb_model
 ## Adding a new endpoint
 
 1. Open `ov_server.py` only.
-2. Add the Pydantic request model (if needed) near the other models at line ~1297.
+2. Add the Pydantic request model (if needed) near the other models in ov_server.py (around `ChatRequest`).
 3. Add the route handler using `@app.get` or `@app.post`.
 4. Call into the relevant module (`model_manager`, `catalogue`, `router`) — do not
    duplicate logic that already exists there.

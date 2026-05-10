@@ -148,9 +148,6 @@ def _pil_to_ov_tensor(img: Image.Image):
     return ov.Tensor(np.array(img, dtype=np.uint8))
 
 
-_has_images = has_images  # alias — removed in Step 6
-
-
 def _extract_images(messages: List["Message"]) -> List[Image.Image]:
     images: List[Image.Image] = []
     for m in messages:
@@ -621,7 +618,7 @@ async def _proxy_chat(req: ChatRequest, spec: dict) -> Union[StreamingResponse, 
 
 @app.post("/v1/chat/completions")
 async def chat(req: ChatRequest):
-    if _has_images(req.messages):
+    if has_images(req.messages):
         return await _chat_vlm(req)
 
     loop = asyncio.get_running_loop()
