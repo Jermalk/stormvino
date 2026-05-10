@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 import openvino_genai as ov_genai
@@ -91,6 +91,8 @@ from server_config import (
 import model_manager
 import catalogue
 import router
+import image_pipeline
+import stt_pipeline
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +290,25 @@ class EmbeddingRequest(BaseModel):
     model: str = EMBEDDING_MODEL_ID
     input: List[str] | str
 
+class ImageGenerationRequest(BaseModel):
+    prompt: str
+    negative_prompt: str = ""
+    n: int = 1
+    size: str = "1024x1024"
+    response_format: str = "b64_json"
+    model: str = ""           # defaults to config image_model
+    quality: str = "standard" # OpenAI compat, ignored
+    style: str = "vivid"      # OpenAI compat, ignored
+    num_inference_steps: int | None = None
+    seed: int | None = None
+
+class AudioTranscriptionRequest(BaseModel):
+    model: str = ""           # defaults to config stt_model
+    language: str | None = None
+    response_format: str = "json"
+    task: str = "transcribe"
+    temperature: float | None = None  # OpenAI compat, ignored
+
 class ProfileRequest(BaseModel):
     profile: str
 
@@ -370,6 +391,9 @@ async def health():
         "loaded_vlm_models": list(model_manager.loaded_vlm_models.keys()),
         "embedding_loaded":  model_manager.emb_model is not None,
         "assessor_loaded":   model_manager._assessor_pipe is not None,
+        "image_model_loaded": image_pipeline.is_loaded(),
+        "image_model_id":     image_pipeline.loaded_model_id(),
+        "stt_model_loaded":   stt_pipeline.is_loaded(),
         "vram_total_gb":     round(model_manager._TOTAL_VRAM_GB, 2) if model_manager._TOTAL_VRAM_GB else None,
         "vram_allocated_gb": {k: round(v, 2) for k, v in model_manager._vram_allocated.items()},
         "vram_free_gb":      round(model_manager.vram_free_gb(), 2) if model_manager.vram_free_gb() is not None else None,
@@ -1130,6 +1154,78 @@ async def embeddings(req: EmbeddingRequest):
         "data": [{"object": "embedding", "index": i, "embedding": e} for i, e in enumerate(embs)],
         "usage": {"prompt_tokens": sum(len(tok.encode(t)) for t in texts), "total_tokens": 0}
     }
+
+
+@app.post("/v1/images/generations")
+async def images_generations(req: ImageGenerationRequest):
+    model_id = req.model or _cfg.get("image_model", "")
+    if not model_id:
+        raise HTTPException(status_code=400, detail="No image_model configured and no model in request")
+    model_dir = str(Path(MODELS_DIR) / model_id)
+    if not Path(model_dir).exists():
+        raise HTTPException(status_code=400, detail=f"Image model '{model_id}' not found at {model_dir}")
+    device = _cfg.get("image_device", DEVICE)
+    steps = req.num_inference_steps if req.num_inference_steps is not None else _cfg.get("image_num_steps", 20)
+    width, height = image_pipeline._parse_size(req.size)
+    n = max(1, min(req.n, 4))
+
+    try:
+        b64_images = await image_pipeline.generate_images(
+            prompt=req.prompt,
+            negative_prompt=req.negative_prompt,
+            width=width,
+            height=height,
+            num_inference_steps=steps,
+            seed=req.seed,
+            num_images=n,
+            model_dir=model_dir,
+            device=device,
+        )
+    except Exception as exc:
+        log.error(f"Image generation error: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    import time as _time
+    return {
+        "created": int(_time.time()),
+        "data": [{"b64_json": b64} for b64 in b64_images],
+    }
+
+
+@app.post("/v1/audio/transcriptions")
+async def audio_transcriptions(
+    file: UploadFile = File(...),
+    model: str = Form(default=""),
+    language: Optional[str] = Form(default=None),
+    response_format: str = Form(default="json"),
+    task: str = Form(default="transcribe"),
+):
+    model_id = _cfg.get("stt_model", "")
+    if not model_id:
+        raise HTTPException(status_code=400, detail="No stt_model configured")
+    model_dir = str(Path(MODELS_DIR) / model_id)
+    if not Path(model_dir).exists():
+        raise HTTPException(status_code=400, detail=f"STT model '{model_id}' not found at {model_dir}")
+    device = _cfg.get("stt_device", DEVICE)
+
+    audio_bytes = await file.read()
+    try:
+        text = await stt_pipeline.transcribe(
+            audio_data=audio_bytes,
+            filename=file.filename or "audio",
+            language=language,
+            task=task,
+            model_dir=model_dir,
+            device=device,
+        )
+    except Exception as exc:
+        log.error(f"STT transcription error: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    if response_format == "text":
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(text)
+    return {"text": text}
 
 
 if __name__ == "__main__":
