@@ -15,37 +15,51 @@ import numpy as np
 import pytest
 
 import ov_server
+import catalogue
+import router
+import model_manager
+import server_config
+
 from ov_server import (
     ContentPart,
     Message,
     ThinkStreamHandler,
     _VALID_SCOPES,
+    _limit_image_history,
+    _pick_backend_name,
+    _text_content,
+    _extract_agent_json,
+    decode_result,
+    extract_thinking,
+    parse_tool_calls,
+)
+from catalogue import (
     _build_catalogue,
+    _catalogue_cache,
+    _fetch_ovh_catalogue,
+    _local_catalogue,
+    _refresh_catalogue,
+    _scope_includes,
+    _tier_map_for_provider,
+    _AUTO_ENTRY,
+)
+from router import (
     _compute_task_class_centroids,
     _detect_signal,
     _route_by_embedding,
     _select_model,
     complexity_score,
-    _catalogue_cache,
+)
+from server_config import (
     _discover_models,
     _discover_vlm_models,
-    _extract_agent_json,
-    _fetch_ovh_catalogue,
-    _has_images,
-    _limit_image_history,
     _load_config,
-    _local_catalogue,
-    _pick_backend_name,
-    _refresh_catalogue,
-    _scope_includes,
-    _text_content,
-    _tier_map_for_provider,
     _validate_config,
-    decode_result,
-    extract_thinking,
+)
+from model_manager import vram_free_gb
+from prompt_builder import (
     format_thinking,
-    parse_tool_calls,
-    vram_free_gb,
+    has_images as _has_images,
 )
 
 
@@ -423,20 +437,20 @@ class TestPickBackendName:
 
 class TestVramFreeGb:
     def test_returns_none_when_total_unknown(self):
-        with patch.object(ov_server, "_TOTAL_VRAM_GB", None):
+        with patch.object(model_manager, "_TOTAL_VRAM_GB", None):
             assert vram_free_gb() is None
 
     def test_free_equals_total_minus_allocated(self):
         with (
-            patch.object(ov_server, "_TOTAL_VRAM_GB", 24.0),
-            patch.object(ov_server, "_vram_allocated", {"model-a": 8.0, "model-b": 6.0}),
+            patch.object(model_manager, "_TOTAL_VRAM_GB", 24.0),
+            patch.object(model_manager, "_vram_allocated", {"model-a": 8.0, "model-b": 6.0}),
         ):
             assert abs(vram_free_gb() - 10.0) < 0.001
 
     def test_no_allocations(self):
         with (
-            patch.object(ov_server, "_TOTAL_VRAM_GB", 16.0),
-            patch.object(ov_server, "_vram_allocated", {}),
+            patch.object(model_manager, "_TOTAL_VRAM_GB", 16.0),
+            patch.object(model_manager, "_vram_allocated", {}),
         ):
             assert abs(vram_free_gb() - 16.0) < 0.001
 
@@ -510,7 +524,7 @@ class TestDiscoverVlmModels:
 
 class TestLoadConfig:
     def test_defaults_when_no_file(self):
-        with patch.object(ov_server, "_CONFIG_FILE", Path("/nonexistent/config.json")):
+        with patch.object(server_config, "_CONFIG_FILE", Path("/nonexistent/config.json")):
             cfg = _load_config()
         assert "models_dir" in cfg
         assert "device" in cfg
@@ -521,7 +535,7 @@ class TestLoadConfig:
             json.dump({"device": "CPU", "max_loaded_models": 3}, f)
             fpath = Path(f.name)
         try:
-            with patch.object(ov_server, "_CONFIG_FILE", fpath):
+            with patch.object(server_config, "_CONFIG_FILE", fpath):
                 cfg = _load_config()
             assert cfg["device"] == "CPU"
             assert cfg["max_loaded_models"] == 3
@@ -533,7 +547,7 @@ class TestLoadConfig:
             json.dump({"device": "CPU"}, f)
             fpath = Path(f.name)
         try:
-            with patch.object(ov_server, "_CONFIG_FILE", fpath):
+            with patch.object(server_config, "_CONFIG_FILE", fpath):
                 cfg = _load_config()
             assert "max_loaded_models" in cfg
         finally:
@@ -544,43 +558,43 @@ class TestLoadConfig:
             f.write("{ not valid json }")
             fpath = Path(f.name)
         try:
-            with patch.object(ov_server, "_CONFIG_FILE", fpath):
+            with patch.object(server_config, "_CONFIG_FILE", fpath):
                 cfg = _load_config()
             assert "device" in cfg
         finally:
             fpath.unlink()
 
     def test_new_routing_keys_present_in_defaults(self):
-        with patch.object(ov_server, "_CONFIG_FILE", Path("/nonexistent/config.json")):
+        with patch.object(server_config, "_CONFIG_FILE", Path("/nonexistent/config.json")):
             cfg = _load_config()
         for key in ("provider_scope", "active_profile", "providers",
                     "assessor", "router", "profiles", "task_classes"):
             assert key in cfg, f"Missing default for '{key}'"
 
     def test_provider_scope_default_is_local(self):
-        with patch.object(ov_server, "_CONFIG_FILE", Path("/nonexistent/config.json")):
+        with patch.object(server_config, "_CONFIG_FILE", Path("/nonexistent/config.json")):
             cfg = _load_config()
         assert cfg["provider_scope"] == "local"
 
     def test_active_profile_default_is_fast(self):
-        with patch.object(ov_server, "_CONFIG_FILE", Path("/nonexistent/config.json")):
+        with patch.object(server_config, "_CONFIG_FILE", Path("/nonexistent/config.json")):
             cfg = _load_config()
         assert cfg["active_profile"] == "fast"
 
     def test_assessor_block_has_model_and_kv(self):
-        with patch.object(ov_server, "_CONFIG_FILE", Path("/nonexistent/config.json")):
+        with patch.object(server_config, "_CONFIG_FILE", Path("/nonexistent/config.json")):
             cfg = _load_config()
         assert "model" in cfg["assessor"]
         assert "kv_cache_size_gb" in cfg["assessor"]
 
     def test_router_block_has_threshold_and_keywords(self):
-        with patch.object(ov_server, "_CONFIG_FILE", Path("/nonexistent/config.json")):
+        with patch.object(server_config, "_CONFIG_FILE", Path("/nonexistent/config.json")):
             cfg = _load_config()
         assert "embedding_threshold" in cfg["router"]
         assert "keywords" in cfg["router"]
 
     def test_default_profiles_shape(self):
-        with patch.object(ov_server, "_CONFIG_FILE", Path("/nonexistent/config.json")):
+        with patch.object(server_config, "_CONFIG_FILE", Path("/nonexistent/config.json")):
             cfg = _load_config()
         for name in ("fast", "precise", "laborious"):
             p = cfg["profiles"][name]
@@ -590,7 +604,7 @@ class TestLoadConfig:
             assert "use_assessor" in p
 
     def test_task_classes_have_five_defaults(self):
-        with patch.object(ov_server, "_CONFIG_FILE", Path("/nonexistent/config.json")):
+        with patch.object(server_config, "_CONFIG_FILE", Path("/nonexistent/config.json")):
             cfg = _load_config()
         for cls in ("vision", "web_search", "document", "code", "general"):
             assert cls in cfg["task_classes"], f"Missing task class '{cls}'"
@@ -600,7 +614,7 @@ class TestLoadConfig:
             json.dump({"active_profile": "precise"}, f)
             fpath = Path(f.name)
         try:
-            with patch.object(ov_server, "_CONFIG_FILE", fpath):
+            with patch.object(server_config, "_CONFIG_FILE", fpath):
                 cfg = _load_config()
             assert cfg["active_profile"] == "precise"
         finally:
@@ -611,7 +625,7 @@ class TestLoadConfig:
             json.dump({"assessor": {"model": "qwen3-8b-int4-ov", "kv_cache_size_gb": 2}}, f)
             fpath = Path(f.name)
         try:
-            with patch.object(ov_server, "_CONFIG_FILE", fpath):
+            with patch.object(server_config, "_CONFIG_FILE", fpath):
                 cfg = _load_config()
             assert cfg["assessor"]["model"] == "qwen3-8b-int4-ov"
         finally:
@@ -726,10 +740,10 @@ class TestTierMapForProvider:
 class TestLocalCatalogue:
     def _run(self, available_models, available_vlm, loaded, loaded_vlm, task_classes):
         with (
-            patch.object(ov_server, "AVAILABLE_MODELS", available_models),
-            patch.object(ov_server, "AVAILABLE_VLM_MODELS", available_vlm),
-            patch.object(ov_server, "loaded_models", loaded),
-            patch.object(ov_server, "loaded_vlm_models", loaded_vlm),
+            patch.object(catalogue, "AVAILABLE_MODELS", available_models),
+            patch.object(catalogue, "AVAILABLE_VLM_MODELS", available_vlm),
+            patch.object(model_manager, "loaded_models", loaded),
+            patch.object(model_manager, "loaded_vlm_models", loaded_vlm),
             patch.dict(ov_server._cfg, {"task_classes": task_classes}),
         ):
             return _local_catalogue()
@@ -785,54 +799,54 @@ class TestLocalCatalogue:
 class TestBuildCatalogue:
     def _with_local(self, ids):
         entries = [{"id": i, "provider": "loc"} for i in ids]
-        return patch.object(ov_server, "_local_catalogue", return_value=entries)
+        return patch.object(catalogue, "_local_catalogue", return_value=entries)
 
     def test_local_scope_returns_only_local(self):
         with self._with_local(["m1", "m2"]):
-            ov_server._catalogue_cache.pop("ovh", None)
+            catalogue._catalogue_cache.pop("ovh", None)
             result = _build_catalogue("local")
         assert all(e["provider"] == "loc" for e in result)
         assert len(result) == 3  # Auto entry + m1 + m2
 
     def test_local_scope_ignores_ovh_cache(self):
-        ov_server._catalogue_cache["ovh"] = ([{"id": "cloud", "provider": "ovh"}], time.time())
+        catalogue._catalogue_cache["ovh"] = ([{"id": "cloud", "provider": "ovh"}], time.time())
         with self._with_local(["m1"]):
             result = _build_catalogue("local")
-        ov_server._catalogue_cache.pop("ovh", None)
+        catalogue._catalogue_cache.pop("ovh", None)
         assert len(result) == 2  # Auto entry + m1
         assert any(e["id"] == "m1" for e in result)
 
     def test_ovh_scope_includes_cached_ovh(self):
-        ov_server._catalogue_cache["ovh"] = ([{"id": "cloud", "provider": "ovh"}], time.time())
+        catalogue._catalogue_cache["ovh"] = ([{"id": "cloud", "provider": "ovh"}], time.time())
         with self._with_local(["m1"]):
             result = _build_catalogue("local+ovh")
-        ov_server._catalogue_cache.pop("ovh", None)
+        catalogue._catalogue_cache.pop("ovh", None)
         ids = {e["id"] for e in result}
         assert ids == {"Auto", "m1", "cloud"}
 
     def test_all_scope_includes_cached_ovh(self):
-        ov_server._catalogue_cache["ovh"] = ([{"id": "cloud", "provider": "ovh"}], time.time())
+        catalogue._catalogue_cache["ovh"] = ([{"id": "cloud", "provider": "ovh"}], time.time())
         # "all" resolves via config.providers — ensure ovh is present
         with (
             self._with_local(["m1"]),
             patch.dict(ov_server._cfg, {"providers": {"ovh": {}}}),
         ):
             result = _build_catalogue("all")
-        ov_server._catalogue_cache.pop("ovh", None)
+        catalogue._catalogue_cache.pop("ovh", None)
         ids = {e["id"] for e in result}
         assert "cloud" in ids
 
     def test_ovh_scope_with_empty_cache_returns_local_only(self):
-        ov_server._catalogue_cache.pop("ovh", None)
+        catalogue._catalogue_cache.pop("ovh", None)
         with self._with_local(["m1"]):
             result = _build_catalogue("local+ovh")
         assert len(result) == 2  # Auto entry + m1
 
     def test_empty_available_models_returns_empty(self):
-        ov_server._catalogue_cache.pop("ovh", None)
-        with patch.object(ov_server, "_local_catalogue", return_value=[]):
+        catalogue._catalogue_cache.pop("ovh", None)
+        with patch.object(catalogue, "_local_catalogue", return_value=[]):
             result = _build_catalogue("local")
-        assert result == [ov_server._AUTO_ENTRY]
+        assert result == [_AUTO_ENTRY]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -845,7 +859,7 @@ pytestmark_anyio = pytest.mark.anyio
 @pytest.mark.anyio
 class TestFetchOvhCatalogue:
     def setup_method(self):
-        ov_server._catalogue_cache.pop("ovh", None)
+        catalogue._catalogue_cache.pop("ovh", None)
 
     def _mock_response(self, model_ids: list[str]):
         data = [{"id": mid, "object": "model"} for mid in model_ids]
@@ -857,17 +871,17 @@ class TestFetchOvhCatalogue:
     async def test_fresh_fetch_populates_cache(self):
         spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
         resp = self._mock_response(["ModelA", "ModelB"])
-        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+        with patch("catalogue.httpx.AsyncClient") as mock_cls:
             mock_cls.return_value.__aenter__.return_value.get = AsyncMock(return_value=resp)
             result = await _fetch_ovh_catalogue(spec)
         assert len(result) == 2
         assert any(e["id"] == "ModelA" for e in result)
-        assert "ovh" in ov_server._catalogue_cache
+        assert "ovh" in catalogue._catalogue_cache
 
     async def test_provider_is_ovh(self):
         spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
         resp = self._mock_response(["ModelA"])
-        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+        with patch("catalogue.httpx.AsyncClient") as mock_cls:
             mock_cls.return_value.__aenter__.return_value.get = AsyncMock(return_value=resp)
             result = await _fetch_ovh_catalogue(spec)
         assert all(e["provider"] == "ovh" for e in result)
@@ -875,35 +889,35 @@ class TestFetchOvhCatalogue:
     async def test_loaded_is_always_false(self):
         spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
         resp = self._mock_response(["ModelA"])
-        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+        with patch("catalogue.httpx.AsyncClient") as mock_cls:
             mock_cls.return_value.__aenter__.return_value.get = AsyncMock(return_value=resp)
             result = await _fetch_ovh_catalogue(spec)
         assert all(e["loaded"] is False for e in result)
 
     async def test_cache_hit_skips_http(self):
         cached = [{"id": "cached-model", "provider": "ovh"}]
-        ov_server._catalogue_cache["ovh"] = (cached, time.time())
+        catalogue._catalogue_cache["ovh"] = (cached, time.time())
         spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
-        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+        with patch("catalogue.httpx.AsyncClient") as mock_cls:
             result = await _fetch_ovh_catalogue(spec)
             mock_cls.assert_not_called()
         assert result == cached
-        ov_server._catalogue_cache.pop("ovh", None)
+        catalogue._catalogue_cache.pop("ovh", None)
 
     async def test_expired_cache_triggers_refetch(self):
         old = [{"id": "old-model", "provider": "ovh"}]
-        ov_server._catalogue_cache["ovh"] = (old, time.time() - 400)  # expired
+        catalogue._catalogue_cache["ovh"] = (old, time.time() - 400)  # expired
         spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
         resp = self._mock_response(["new-model"])
-        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+        with patch("catalogue.httpx.AsyncClient") as mock_cls:
             mock_cls.return_value.__aenter__.return_value.get = AsyncMock(return_value=resp)
             result = await _fetch_ovh_catalogue(spec)
         assert any(e["id"] == "new-model" for e in result)
-        ov_server._catalogue_cache.pop("ovh", None)
+        catalogue._catalogue_cache.pop("ovh", None)
 
     async def test_network_error_returns_empty_when_no_cache(self):
         spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
-        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+        with patch("catalogue.httpx.AsyncClient") as mock_cls:
             mock_cls.return_value.__aenter__.return_value.get = AsyncMock(
                 side_effect=Exception("connection refused")
             )
@@ -912,15 +926,15 @@ class TestFetchOvhCatalogue:
 
     async def test_network_error_returns_stale_cache(self):
         stale = [{"id": "stale", "provider": "ovh"}]
-        ov_server._catalogue_cache["ovh"] = (stale, time.time() - 9999)  # very stale
+        catalogue._catalogue_cache["ovh"] = (stale, time.time() - 9999)  # very stale
         spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
-        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+        with patch("catalogue.httpx.AsyncClient") as mock_cls:
             mock_cls.return_value.__aenter__.return_value.get = AsyncMock(
                 side_effect=Exception("timeout")
             )
             result = await _fetch_ovh_catalogue(spec)
         assert result == stale
-        ov_server._catalogue_cache.pop("ovh", None)
+        catalogue._catalogue_cache.pop("ovh", None)
 
     async def test_tier_from_task_classes_applied(self):
         tc = {"code": {"models": [{"id": "ModelA", "provider": "ovh", "tier": "fast"}]}}
@@ -928,21 +942,21 @@ class TestFetchOvhCatalogue:
         resp = self._mock_response(["ModelA"])
         with (
             patch.dict(ov_server._cfg, {"task_classes": tc}),
-            patch("ov_server.httpx.AsyncClient") as mock_cls,
+            patch("catalogue.httpx.AsyncClient") as mock_cls,
         ):
             mock_cls.return_value.__aenter__.return_value.get = AsyncMock(return_value=resp)
             result = await _fetch_ovh_catalogue(spec)
         assert result[0]["tier"] == "fast"
-        ov_server._catalogue_cache.pop("ovh", None)
+        catalogue._catalogue_cache.pop("ovh", None)
 
     async def test_unknown_model_defaults_to_best_tier(self):
         spec = {"base_url": "https://fake.ovh/v1", "api_key_env": "", "catalogue_ttl_sec": 300}
         resp = self._mock_response(["UnknownCloud"])
-        with patch("ov_server.httpx.AsyncClient") as mock_cls:
+        with patch("catalogue.httpx.AsyncClient") as mock_cls:
             mock_cls.return_value.__aenter__.return_value.get = AsyncMock(return_value=resp)
             result = await _fetch_ovh_catalogue(spec)
         assert result[0]["tier"] == "best"
-        ov_server._catalogue_cache.pop("ovh", None)
+        catalogue._catalogue_cache.pop("ovh", None)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -962,22 +976,30 @@ _EMPTY_MODELS = dict(
 
 def _patch_models(**overrides):
     patches = {**_EMPTY_MODELS, **overrides}
-    return [patch.object(ov_server, k, v) for k, v in patches.items()]
+    cat_keys = {"AVAILABLE_MODELS", "AVAILABLE_VLM_MODELS"}
+    mm_keys = {"loaded_models", "loaded_vlm_models"}
+    result = []
+    for k, v in patches.items():
+        if k in cat_keys:
+            result.append(patch.object(catalogue, k, v))
+        elif k in mm_keys:
+            result.append(patch.object(model_manager, k, v))
+    return result
 
 
 @pytest.mark.anyio
 class TestListModels:
     def setup_method(self):
-        ov_server._catalogue_cache.pop("ovh", None)
+        catalogue._catalogue_cache.pop("ovh", None)
 
     async def test_returns_object_list_shape(self):
         mock_refresh = AsyncMock()
         with (
-            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
-            patch.object(ov_server, "AVAILABLE_MODELS", {"m1": "/p"}),
-            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
-            patch.object(ov_server, "loaded_models", {}),
-            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.object(catalogue, "_refresh_catalogue", mock_refresh),
+            patch.object(catalogue, "AVAILABLE_MODELS", {"m1": "/p"}),
+            patch.object(catalogue, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(model_manager, "loaded_models", {}),
+            patch.object(model_manager, "loaded_vlm_models", {}),
             patch.dict(ov_server._cfg, _LOCAL_CFG),
         ):
             resp = await ov_server.list_models()
@@ -987,11 +1009,11 @@ class TestListModels:
     async def test_each_entry_has_required_fields(self):
         mock_refresh = AsyncMock()
         with (
-            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
-            patch.object(ov_server, "AVAILABLE_MODELS", {"m1": "/p"}),
-            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
-            patch.object(ov_server, "loaded_models", {}),
-            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.object(catalogue, "_refresh_catalogue", mock_refresh),
+            patch.object(catalogue, "AVAILABLE_MODELS", {"m1": "/p"}),
+            patch.object(catalogue, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(model_manager, "loaded_models", {}),
+            patch.object(model_manager, "loaded_vlm_models", {}),
             patch.dict(ov_server._cfg, _LOCAL_CFG),
         ):
             resp = await ov_server.list_models()
@@ -1002,11 +1024,11 @@ class TestListModels:
     async def test_scope_read_from_cfg(self):
         mock_refresh = AsyncMock()
         with (
-            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
-            patch.object(ov_server, "AVAILABLE_MODELS", {}),
-            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
-            patch.object(ov_server, "loaded_models", {}),
-            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.object(catalogue, "_refresh_catalogue", mock_refresh),
+            patch.object(catalogue, "AVAILABLE_MODELS", {}),
+            patch.object(catalogue, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(model_manager, "loaded_models", {}),
+            patch.object(model_manager, "loaded_vlm_models", {}),
             patch.dict(ov_server._cfg, {"provider_scope": "local+ovh", "task_classes": {}}),
         ):
             await ov_server.list_models()
@@ -1015,14 +1037,14 @@ class TestListModels:
     async def test_local_scope_excludes_ovh_cache(self):
         ovh_entry = {"id": "cloud-m", "object": "model", "provider": "ovh",
                      "tier": "best", "context_length": None, "pricing": None, "loaded": False}
-        ov_server._catalogue_cache["ovh"] = ([ovh_entry], time.time())
+        catalogue._catalogue_cache["ovh"] = ([ovh_entry], time.time())
         mock_refresh = AsyncMock()
         with (
-            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
-            patch.object(ov_server, "AVAILABLE_MODELS", {}),
-            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
-            patch.object(ov_server, "loaded_models", {}),
-            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.object(catalogue, "_refresh_catalogue", mock_refresh),
+            patch.object(catalogue, "AVAILABLE_MODELS", {}),
+            patch.object(catalogue, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(model_manager, "loaded_models", {}),
+            patch.object(model_manager, "loaded_vlm_models", {}),
             patch.dict(ov_server._cfg, _LOCAL_CFG),
         ):
             resp = await ov_server.list_models()
@@ -1031,14 +1053,14 @@ class TestListModels:
     async def test_local_plus_ovh_scope_includes_ovh_entries(self):
         ovh_entry = {"id": "cloud-m", "object": "model", "provider": "ovh",
                      "tier": "best", "context_length": None, "pricing": None, "loaded": False}
-        ov_server._catalogue_cache["ovh"] = ([ovh_entry], time.time())
+        catalogue._catalogue_cache["ovh"] = ([ovh_entry], time.time())
         mock_refresh = AsyncMock()
         with (
-            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
-            patch.object(ov_server, "AVAILABLE_MODELS", {}),
-            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
-            patch.object(ov_server, "loaded_models", {}),
-            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.object(catalogue, "_refresh_catalogue", mock_refresh),
+            patch.object(catalogue, "AVAILABLE_MODELS", {}),
+            patch.object(catalogue, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(model_manager, "loaded_models", {}),
+            patch.object(model_manager, "loaded_vlm_models", {}),
             patch.dict(ov_server._cfg, {"provider_scope": "local+ovh", "task_classes": {}}),
         ):
             resp = await ov_server.list_models()
@@ -1049,11 +1071,11 @@ class TestListModels:
     async def test_loaded_flag_reflects_loaded_models(self):
         mock_refresh = AsyncMock()
         with (
-            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
-            patch.object(ov_server, "AVAILABLE_MODELS", {"hot": "/p", "cold": "/q"}),
-            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
-            patch.object(ov_server, "loaded_models", {"hot": object()}),
-            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.object(catalogue, "_refresh_catalogue", mock_refresh),
+            patch.object(catalogue, "AVAILABLE_MODELS", {"hot": "/p", "cold": "/q"}),
+            patch.object(catalogue, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(model_manager, "loaded_models", {"hot": object()}),
+            patch.object(model_manager, "loaded_vlm_models", {}),
             patch.dict(ov_server._cfg, _LOCAL_CFG),
         ):
             resp = await ov_server.list_models()
@@ -1065,11 +1087,11 @@ class TestListModels:
         mock_refresh = AsyncMock()
         cfg_without_scope = {k: v for k, v in ov_server._cfg.items() if k != "provider_scope"}
         with (
-            patch.object(ov_server, "_refresh_catalogue", mock_refresh),
-            patch.object(ov_server, "AVAILABLE_MODELS", {}),
-            patch.object(ov_server, "AVAILABLE_VLM_MODELS", {}),
-            patch.object(ov_server, "loaded_models", {}),
-            patch.object(ov_server, "loaded_vlm_models", {}),
+            patch.object(catalogue, "_refresh_catalogue", mock_refresh),
+            patch.object(catalogue, "AVAILABLE_MODELS", {}),
+            patch.object(catalogue, "AVAILABLE_VLM_MODELS", {}),
+            patch.object(model_manager, "loaded_models", {}),
+            patch.object(model_manager, "loaded_vlm_models", {}),
             patch.object(ov_server, "_cfg", cfg_without_scope),
         ):
             await ov_server.list_models()
@@ -1083,12 +1105,12 @@ class TestListModels:
 @pytest.mark.anyio
 class TestSetScope:
     def setup_method(self):
-        ov_server._catalogue_cache.clear()
+        catalogue._catalogue_cache.clear()
         ov_server._cfg["provider_scope"] = "local"
 
     def teardown_method(self):
         ov_server._cfg["provider_scope"] = "local"
-        ov_server._catalogue_cache.clear()
+        catalogue._catalogue_cache.clear()
 
     async def test_valid_scope_returns_200(self):
         for scope in _VALID_SCOPES:
@@ -1109,10 +1131,10 @@ class TestSetScope:
         assert ov_server._cfg["provider_scope"] == "local+ovh"
 
     async def test_cache_cleared_on_scope_change(self):
-        ov_server._catalogue_cache["ovh"] = ([], time.time())
+        catalogue._catalogue_cache["ovh"] = ([], time.time())
         req = ov_server.ScopeRequest(scope="local+ovh")
         await ov_server.set_scope(req)
-        assert "ovh" not in ov_server._catalogue_cache
+        assert "ovh" not in catalogue._catalogue_cache
 
     async def test_invalid_scope_raises_400(self):
         from fastapi import HTTPException
@@ -1355,18 +1377,18 @@ class TestRouteByEmbedding:
     def _patches(self, embeddings):
         from contextlib import ExitStack
         stack = ExitStack()
-        stack.enter_context(patch.object(ov_server, "_task_class_embeddings", embeddings))
-        stack.enter_context(patch.object(ov_server, "emb_model", self._mock_model))
-        stack.enter_context(patch.object(ov_server, "emb_tokenizer", _fake_tokenizer()))
+        stack.enter_context(patch.object(router, "_task_class_embeddings", embeddings))
+        stack.enter_context(patch.object(model_manager, "emb_model", self._mock_model))
+        stack.enter_context(patch.object(model_manager, "emb_tokenizer", _fake_tokenizer()))
         return stack
 
     def test_empty_embeddings_returns_general(self):
-        with patch.object(ov_server, "_task_class_embeddings", {}):
+        with patch.object(router, "_task_class_embeddings", {}):
             cls, score, vec = _route_by_embedding("hello")
             assert cls == "general" and score == 0.0 and vec is None
 
     def test_none_embeddings_returns_general(self):
-        with patch.object(ov_server, "_task_class_embeddings", None):
+        with patch.object(router, "_task_class_embeddings", None):
             cls, score, vec = _route_by_embedding("hello")
             assert cls == "general" and score == 0.0 and vec is None
 
@@ -1482,8 +1504,8 @@ def _run_select(task_class, profile, complexity=0.0, scope="local",
             "task_classes":  _TC_SELECT_FIXTURE,
             "provider_scope": scope,
         }),
-        patch.object(ov_server, "AVAILABLE_MODELS",     avail),
-        patch.object(ov_server, "AVAILABLE_VLM_MODELS", available_vlm or {}),
+        patch.object(router, "AVAILABLE_MODELS",     avail),
+        patch.object(router, "AVAILABLE_VLM_MODELS", available_vlm or {}),
     ):
         return _select_model(task_class, profile, complexity)
 
@@ -1606,5 +1628,3 @@ class TestThinkStreamHandler:
         h = ThinkStreamHandler(strategy="separate_field")
         deltas = _feed_all(h, ["Plain", " text"])
         assert all("reasoning_content" not in d for d in deltas)
-
-

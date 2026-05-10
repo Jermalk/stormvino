@@ -169,7 +169,7 @@ def test_text_inference() -> bool:
 # Test 4 — image inference via server API
 # ---------------------------------------------------------------------------
 
-def test_image_via_api(model: str) -> bool:
+def test_image_via_api(model: str = "internvl2.5-8b-int4-ov") -> bool:
     print(f"\n[4] Image inference via server API ({model})")
     img_b64 = _make_test_image_b64()
     payload = {
