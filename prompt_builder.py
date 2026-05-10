@@ -103,16 +103,25 @@ def _build_msg_dicts(
 
 
 # ---------------------------------------------------------------------------
-# ToolCallAdapter — one implementation per model family.
+# ModelFamilyAdapter — one implementation per model family.
 #
-# Responsibilities:
-#   build_prompt  — inject tool schemas into the prompt string
-#   parse_tool_calls — extract OpenAI-format tool_calls from raw model output
+# Responsibilities per family:
+#   max_context_tokens  — input token ceiling; server returns 400 if exceeded
+#   sampling_defaults   — base temperature/top_p/repetition_penalty merged
+#                         with per-request overrides before generation
+#   validate_messages   — structural checks specific to the family's template;
+#                         raise ValueError with a clear message on violation
+#   build_prompt        — inject tool schemas into the prompt string
+#   parse_tool_calls    — extract OpenAI-format tool_calls from raw output
 #
-# Adding a new family: subclass (or implement) this Protocol, add a guard in
-# get_adapter(), done.  No changes elsewhere in the codebase needed.
+# Adding a new family: implement this Protocol, add a guard in get_adapter().
 # ---------------------------------------------------------------------------
-class ToolCallAdapter(Protocol):
+class ModelFamilyAdapter(Protocol):
+    max_context_tokens: int
+    sampling_defaults: Dict[str, float]
+
+    def validate_messages(self, messages: List[Message]) -> None: ...
+
     def build_prompt(
         self,
         messages: List[Message],
@@ -134,7 +143,19 @@ class DefaultAdapter:
 
     Injection:     tokenizer.apply_chat_template(tools=…) via Jinja template.
     Output format: <tool_call>{"name":…, "arguments":…}</tool_call>
+    Sampling:      Qwen3 recommended defaults (temp=0.7, top_p=0.8, rep=1.1).
     """
+
+    max_context_tokens: int = 32_768
+    sampling_defaults: Dict[str, float] = {
+        "temperature": 0.7,
+        "top_p": 0.8,
+        "repetition_penalty": 1.1,
+    }
+
+    def validate_messages(self, messages: List[Message]) -> None:
+        if not messages:
+            raise ValueError("messages list is empty")
 
     def build_prompt(
         self,
@@ -175,17 +196,41 @@ class DefaultAdapter:
 class MistralAdapter:
     """Mistral anthracite-core [SYSTEM_PROMPT][INST] tokenizer.
 
-    Injection:     [AVAILABLE_TOOLS]{json}[/AVAILABLE_TOOLS] prepended to system block.
+    Injection:     [AVAILABLE_TOOLS]{json}[/AVAILABLE_TOOLS] in system block.
     Tool results:  [TOOL_RESULTS][{"content":…}][/TOOL_RESULTS]
     Output format: function_name{"key": "value"}
+    Constraint:    system message must appear at position 0 (template raises
+                   otherwise); validated before prompt building.
     """
+
+    max_context_tokens: int = 32_768
+    sampling_defaults: Dict[str, float] = {
+        "temperature": 0.7,
+        "top_p": 1.0,
+        "repetition_penalty": 1.0,
+    }
+
+    def validate_messages(self, messages: List[Message]) -> None:
+        if not messages:
+            raise ValueError("messages list is empty")
+        system_indices = [i for i, m in enumerate(messages) if m.role == "system"]
+        if len(system_indices) > 1:
+            raise ValueError(
+                f"Mistral template does not support multiple system messages "
+                f"(found at positions {system_indices})"
+            )
+        if system_indices and system_indices[0] != 0:
+            raise ValueError(
+                f"Mistral template requires the system message at position 0 "
+                f"(found at position {system_indices[0]})"
+            )
 
     def build_prompt(
         self,
         messages: List[Message],
         tokenizer: AutoTokenizer,
         tools: List[Dict[str, Any]],
-        thinking: bool,  # Mistral has no thinking mode; parameter kept for interface parity
+        thinking: bool,  # Mistral has no thinking mode; kept for interface parity
     ) -> str:
         bos = tokenizer.bos_token or "<s>"
         eos = tokenizer.eos_token or "</s>"
@@ -249,16 +294,64 @@ class MistralAdapter:
             return None, text.strip()
 
 
+class InternVLAdapter:
+    """InternVL2.5 family (InternLM2 backbone, detected via <IMG_CONTEXT> token).
+
+    max_context_tokens: 8192 — InternVL2.5 text budget; image tokens consume
+    context at ~256 tokens per tile so the effective text ceiling is lower
+    for multi-image inputs.
+
+    Sampling: InternLM2 recommended defaults (higher temperature than Qwen).
+
+    Tool calling: InternLM2 uses <|action_start|><|plugin|> format — not yet
+    implemented. build_prompt/parse_tool_calls delegate to DefaultAdapter;
+    update both when InternVL2.5-26B tool calling is validated on this server.
+    """
+
+    max_context_tokens: int = 8_192
+    sampling_defaults: Dict[str, float] = {
+        "temperature": 0.9,
+        "top_p": 0.95,
+        "repetition_penalty": 1.0,
+    }
+
+    def validate_messages(self, messages: List[Message]) -> None:
+        if not messages:
+            raise ValueError("messages list is empty")
+
+    def build_prompt(
+        self,
+        messages: List[Message],
+        tokenizer: AutoTokenizer,
+        tools: List[Dict[str, Any]],
+        thinking: bool,
+    ) -> str:
+        return _DEFAULT_ADAPTER.build_prompt(messages, tokenizer, tools, thinking)
+
+    def parse_tool_calls(self, text: str) -> tuple[list[dict] | None, str]:
+        return _DEFAULT_ADAPTER.parse_tool_calls(text)
+
+
 # Singletons — adapters are stateless
 _DEFAULT_ADAPTER = DefaultAdapter()
 _MISTRAL_ADAPTER = MistralAdapter()
+_INTERNVL_ADAPTER = InternVLAdapter()
 
 
-def get_adapter(tokenizer: AutoTokenizer) -> DefaultAdapter | MistralAdapter:
-    """Return the ToolCallAdapter for this tokenizer's model family."""
+def get_adapter(tokenizer: AutoTokenizer) -> DefaultAdapter | MistralAdapter | InternVLAdapter:
+    """Return the ModelFamilyAdapter for this tokenizer's model family.
+
+    Detection order matters: check most-specific signatures first.
+      [SYSTEM_PROMPT] → Mistral anthracite-core
+      <IMG_CONTEXT>   → InternVL2.5 (InternLM2 backbone)
+      default         → Qwen3, Phi-4, Llama 3, Gemma (native Jinja tool support)
+    """
     tmpl = getattr(tokenizer, "chat_template", "") or ""
     if "[SYSTEM_PROMPT]" in tmpl:
         return _MISTRAL_ADAPTER
+    special = str(getattr(tokenizer, "additional_special_tokens", []))
+    if "<IMG_CONTEXT>" in special:
+        return _INTERNVL_ADAPTER
     return _DEFAULT_ADAPTER
 
 

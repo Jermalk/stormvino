@@ -23,7 +23,7 @@ from prompt_builder import (
     _text_content, build_vlm_prompt, build_prompt,
     _extract_agent_json, parse_tool_calls,
     decode_result, extract_thinking, format_thinking,
-    ThinkStreamHandler, has_images,
+    ThinkStreamHandler, has_images, get_adapter,
 )
 
 _request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
@@ -277,7 +277,9 @@ class ChatRequest(BaseModel):
     model: str = "qwen2.5-3b-int4"
     messages: List[Message]
     max_tokens: Optional[int] = None
-    temperature: Optional[float] = 0.7
+    temperature: Optional[float] = None       # None → use adapter family default
+    top_p: Optional[float] = None             # None → use adapter family default
+    repetition_penalty: Optional[float] = None  # None → use adapter family default
     stream: Optional[bool] = False
     thinking: Optional[bool] = True   # False → appends /no_think to system prompt
     tools: Optional[List[Dict[str, Any]]] = None
@@ -446,12 +448,36 @@ async def _chat_vlm(req: ChatRequest):
     if debug_logging:
         log.info(f"[DEBUG] VLM prompt ({model_id}, {len(images)} image(s)):\n{prompt[:3000]}")
 
-    gen_config = ov_genai.GenerationConfig()
-    gen_config.max_new_tokens = req.max_tokens if req.max_tokens is not None else MAX_NEW_TOKENS_DEFAULT
-    gen_config.temperature = req.temperature
-    gen_config.do_sample = req.temperature > 0
+    vlm_adapter = get_adapter(tokenizer)
+    try:
+        vlm_adapter.validate_messages(messages)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     prompt_tokens = len(tokenizer.encode(prompt))
+    if prompt_tokens > vlm_adapter.max_context_tokens:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Prompt too long: {prompt_tokens} tokens exceeds "
+                f"{model_id} context limit of {vlm_adapter.max_context_tokens}"
+            ),
+        )
+
+    vlm_sampling = vlm_adapter.sampling_defaults.copy()
+    if req.temperature is not None:
+        vlm_sampling["temperature"] = req.temperature
+    if req.top_p is not None:
+        vlm_sampling["top_p"] = req.top_p
+    if req.repetition_penalty is not None:
+        vlm_sampling["repetition_penalty"] = req.repetition_penalty
+
+    gen_config = ov_genai.GenerationConfig()
+    gen_config.max_new_tokens = req.max_tokens if req.max_tokens is not None else MAX_NEW_TOKENS_DEFAULT
+    gen_config.temperature = vlm_sampling["temperature"]
+    gen_config.top_p = vlm_sampling["top_p"]
+    gen_config.repetition_penalty = vlm_sampling["repetition_penalty"]
+    gen_config.do_sample = vlm_sampling["temperature"] > 0
 
     stats.active_requests += 1
     stats.total_requests += 1
@@ -737,16 +763,40 @@ async def chat(req: ChatRequest):
         model_id = next(k for k in model_manager.loaded_models if model_manager.loaded_models[k] is pipe)
         tokenizer = model_manager.loaded_tokenizers[model_id]
 
+    adapter = get_adapter(tokenizer)
+    try:
+        adapter.validate_messages(req.messages)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     prompt = build_prompt(req.messages, tokenizer, tools=req.tools, thinking=effective_thinking)
     if debug_logging:
         log.info(f"[DEBUG] Rendered prompt ({model_id}, agent={is_agent}):\n{prompt[:3000]}")
 
+    prompt_tokens = len(tokenizer.encode(prompt))
+    if prompt_tokens > adapter.max_context_tokens:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Prompt too long: {prompt_tokens} tokens exceeds "
+                f"{model_id} context limit of {adapter.max_context_tokens}"
+            ),
+        )
+
+    sampling = adapter.sampling_defaults.copy()
+    if req.temperature is not None:
+        sampling["temperature"] = req.temperature
+    if req.top_p is not None:
+        sampling["top_p"] = req.top_p
+    if req.repetition_penalty is not None:
+        sampling["repetition_penalty"] = req.repetition_penalty
+
     gen_config = ov_genai.GenerationConfig()
     gen_config.max_new_tokens = effective_max_tokens
-    gen_config.temperature = req.temperature
-    gen_config.do_sample = req.temperature > 0
-
-    prompt_tokens = len(tokenizer.encode(prompt))
+    gen_config.temperature = sampling["temperature"]
+    gen_config.top_p = sampling["top_p"]
+    gen_config.repetition_penalty = sampling["repetition_penalty"]
+    gen_config.do_sample = sampling["temperature"] > 0
 
     stats.active_requests += 1
     stats.total_requests += 1
