@@ -159,6 +159,11 @@ def _route_by_embedding(query: str) -> "tuple[str, float, list[float] | None]":
         score = float(np.dot(vec, centroid))
         if score > best_score:
             best_class, best_score = task_class, score
+
+    min_conf: float = _cfg.get("router", {}).get("embedding_min_confidence", 0.72)
+    if best_score < min_conf:
+        best_class = "general"
+
     return (best_class, best_score, vec.tolist())
 
 

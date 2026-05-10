@@ -56,6 +56,7 @@
 
     "router": {
         "long_context_tokens":   4000,
+        "embedding_min_confidence": 0.72,
         "keywords": {
             "web_search": [
                 "search for", "find on the web", "look up", "google",
