@@ -7,7 +7,7 @@ import json
 import logging
 import re
 import uuid
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Protocol, Union
 
 from pydantic import BaseModel
 from transformers import AutoTokenizer
@@ -29,7 +29,7 @@ class Message(BaseModel):
     role: str
     content: Union[str, List[ContentPart], None] = None
     tool_call_id: Optional[str] = None
-    tool_calls: Optional[List[Dict[str, Any]]] = None  # assistant turns that invoked tools
+    tool_calls: Optional[List[Dict[str, Any]]] = None
     name: Optional[str] = None
 
 
@@ -37,7 +37,6 @@ class Message(BaseModel):
 # Content helpers
 # ---------------------------------------------------------------------------
 def _text_content(msg: Message) -> str:
-    """Extract plain text from a message whose content may be str or a list of parts."""
     if isinstance(msg.content, list):
         return " ".join(p.text for p in msg.content if p.type == "text" and p.text)
     return msg.content or ""
@@ -77,73 +76,12 @@ def build_vlm_prompt(messages: List[Message], tokenizer: AutoTokenizer) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Mistral template detection and manual prompt builder.
-#
-# The anthracite-core text-only variant uses LlamaTokenizerFast with a
-# [SYSTEM_PROMPT][INST] template that silently drops tools= and raises on
-# role="tool".  We detect this template and build the prompt manually:
-#   - tools injected as [AVAILABLE_TOOLS]{json}[/AVAILABLE_TOOLS] in system
-#   - role="tool" rendered as [TOOL_RESULTS][{"content":...}][/TOOL_RESULTS]
-#   - prior assistant tool_calls rendered as function_name{args}</s>
+# Shared msg_dict builder — common to DefaultAdapter and the no-tools path
 # ---------------------------------------------------------------------------
-def _is_mistral_template(tokenizer: AutoTokenizer) -> bool:
-    tmpl = getattr(tokenizer, "chat_template", "") or ""
-    return "[SYSTEM_PROMPT]" in tmpl
-
-
-def _build_mistral_tool_prompt(
+def _build_msg_dicts(
     messages: List[Message],
-    tokenizer: AutoTokenizer,
-    tools: List[Dict[str, Any]],
-) -> str:
-    bos = tokenizer.bos_token or "<s>"
-    eos = tokenizer.eos_token or "</s>"
-
-    # Collect system text; strip any leading system message from loop
-    sys_text = "You are a helpful assistant."
-    loop_messages = messages
-    if messages and messages[0].role == "system":
-        sys_text = _text_content(messages[0])
-        loop_messages = messages[1:]
-
-    tools_block = f"[AVAILABLE_TOOLS]{json.dumps(tools, ensure_ascii=False)}[/AVAILABLE_TOOLS]"
-    parts = [bos, f"[SYSTEM_PROMPT]{tools_block}\n{sys_text}[/SYSTEM_PROMPT]"]
-
-    for m in loop_messages:
-        if m.role == "user":
-            parts.append(f"[INST]{_text_content(m)}[/INST]")
-        elif m.role == "assistant":
-            if m.tool_calls:
-                # Prior assistant turn that called tools — reproduce function_name{args} format
-                for tc in m.tool_calls:
-                    fn = tc.get("function", {})
-                    try:
-                        args = json.loads(fn.get("arguments", "{}"))
-                    except json.JSONDecodeError:
-                        args = {}
-                    parts.append(f'{fn["name"]}{json.dumps(args, ensure_ascii=False)}{eos}')
-            else:
-                text = _text_content(m)
-                if text:
-                    parts.append(f"{text}{eos}")
-        elif m.role == "tool":
-            content = _text_content(m)
-            parts.append(f"[TOOL_RESULTS][{json.dumps({'content': content}, ensure_ascii=False)}][/TOOL_RESULTS]")
-
-    return "".join(parts)
-
-
-# ---------------------------------------------------------------------------
-# LLM prompt builder — delegates tool schema injection to the tokenizer's
-# Jinja template so Qwen3's native tool-call format is always correct.
-# For Mistral [SYSTEM_PROMPT][INST] templates, uses manual injection instead.
-# ---------------------------------------------------------------------------
-def build_prompt(messages: List[Message], tokenizer: AutoTokenizer,
-                 tools: Optional[List[Dict[str, Any]]] = None,
-                 thinking: bool = True) -> str:
-    if tools and _is_mistral_template(tokenizer):
-        return _build_mistral_tool_prompt(messages, tokenizer, tools)
-
+    thinking: bool,
+) -> List[Dict[str, Any]]:
     suffix = " /no_think" if not thinking else ""
     msg_dicts: List[Dict[str, Any]] = []
     has_system = any(m.role == "system" for m in messages)
@@ -157,13 +95,186 @@ def build_prompt(messages: List[Message], tokenizer: AutoTokenizer,
         if m.tool_call_id:
             d["tool_call_id"] = m.tool_call_id
         if m.tool_calls:
-            d["tool_calls"] = m.tool_calls          # round-trip prior assistant tool calls
+            d["tool_calls"] = m.tool_calls
         if m.name:
             d["name"] = m.name
         msg_dicts.append(d)
+    return msg_dicts
+
+
+# ---------------------------------------------------------------------------
+# ToolCallAdapter — one implementation per model family.
+#
+# Responsibilities:
+#   build_prompt  — inject tool schemas into the prompt string
+#   parse_tool_calls — extract OpenAI-format tool_calls from raw model output
+#
+# Adding a new family: subclass (or implement) this Protocol, add a guard in
+# get_adapter(), done.  No changes elsewhere in the codebase needed.
+# ---------------------------------------------------------------------------
+class ToolCallAdapter(Protocol):
+    def build_prompt(
+        self,
+        messages: List[Message],
+        tokenizer: AutoTokenizer,
+        tools: List[Dict[str, Any]],
+        thinking: bool,
+    ) -> str: ...
+
+    def parse_tool_calls(self, text: str) -> tuple[list[dict] | None, str]: ...
+
+
+# --- Compiled patterns (module-level, reused across calls) ---
+_XML_CALL_RE = re.compile(r'<tool_call>\s*(.*?)\s*</tool_call>', re.DOTALL)
+_MISTRAL_CALL_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)(\{.*\})\s*$', re.DOTALL)
+
+
+class DefaultAdapter:
+    """Native apply_chat_template tool support: Qwen3, Phi-4, Llama 3, Gemma.
+
+    Injection:     tokenizer.apply_chat_template(tools=…) via Jinja template.
+    Output format: <tool_call>{"name":…, "arguments":…}</tool_call>
+    """
+
+    def build_prompt(
+        self,
+        messages: List[Message],
+        tokenizer: AutoTokenizer,
+        tools: List[Dict[str, Any]],
+        thinking: bool,
+    ) -> str:
+        return tokenizer.apply_chat_template(
+            _build_msg_dicts(messages, thinking),
+            tools=tools,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+
+    def parse_tool_calls(self, text: str) -> tuple[list[dict] | None, str]:
+        matches = _XML_CALL_RE.findall(text)
+        if not matches:
+            return None, text
+        tool_calls = []
+        for raw in matches:
+            try:
+                data = json.loads(raw)
+                tool_calls.append({
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": data["name"],
+                        "arguments": json.dumps(data.get("arguments", {})),
+                    },
+                })
+            except (json.JSONDecodeError, KeyError):
+                log.warning(f"Failed to parse tool_call JSON: {raw[:100]}")
+        remaining = _XML_CALL_RE.sub("", text).strip()
+        return (tool_calls or None), remaining
+
+
+class MistralAdapter:
+    """Mistral anthracite-core [SYSTEM_PROMPT][INST] tokenizer.
+
+    Injection:     [AVAILABLE_TOOLS]{json}[/AVAILABLE_TOOLS] prepended to system block.
+    Tool results:  [TOOL_RESULTS][{"content":…}][/TOOL_RESULTS]
+    Output format: function_name{"key": "value"}
+    """
+
+    def build_prompt(
+        self,
+        messages: List[Message],
+        tokenizer: AutoTokenizer,
+        tools: List[Dict[str, Any]],
+        thinking: bool,  # Mistral has no thinking mode; parameter kept for interface parity
+    ) -> str:
+        bos = tokenizer.bos_token or "<s>"
+        eos = tokenizer.eos_token or "</s>"
+
+        sys_text = "You are a helpful assistant."
+        loop_messages = messages
+        if messages and messages[0].role == "system":
+            sys_text = _text_content(messages[0])
+            loop_messages = messages[1:]
+
+        tools_block = (
+            f"[AVAILABLE_TOOLS]{json.dumps(tools, ensure_ascii=False)}[/AVAILABLE_TOOLS]"
+        )
+        parts = [bos, f"[SYSTEM_PROMPT]{tools_block}\n{sys_text}[/SYSTEM_PROMPT]"]
+
+        for m in loop_messages:
+            if m.role == "user":
+                parts.append(f"[INST]{_text_content(m)}[/INST]")
+            elif m.role == "assistant":
+                if m.tool_calls:
+                    for tc in m.tool_calls:
+                        fn = tc.get("function", {})
+                        try:
+                            args = json.loads(fn.get("arguments", "{}"))
+                        except json.JSONDecodeError:
+                            args = {}
+                        parts.append(
+                            f'{fn["name"]}{json.dumps(args, ensure_ascii=False)}{eos}'
+                        )
+                else:
+                    text = _text_content(m)
+                    if text:
+                        parts.append(f"{text}{eos}")
+            elif m.role == "tool":
+                content = _text_content(m)
+                parts.append(
+                    f"[TOOL_RESULTS]"
+                    f"[{json.dumps({'content': content}, ensure_ascii=False)}]"
+                    f"[/TOOL_RESULTS]"
+                )
+
+        return "".join(parts)
+
+    def parse_tool_calls(self, text: str) -> tuple[list[dict] | None, str]:
+        hit = _MISTRAL_CALL_RE.match(text.strip())
+        if not hit:
+            return None, text.strip()
+        fn_name, args_str = hit.group(1), hit.group(2)
+        try:
+            args = json.loads(args_str)
+            return [{
+                "id": f"call_{uuid.uuid4().hex[:8]}",
+                "type": "function",
+                "function": {
+                    "name": fn_name,
+                    "arguments": json.dumps(args),
+                },
+            }], ""
+        except json.JSONDecodeError:
+            log.warning(f"Failed to parse Mistral tool_call args: {args_str[:100]}")
+            return None, text.strip()
+
+
+# Singletons — adapters are stateless
+_DEFAULT_ADAPTER = DefaultAdapter()
+_MISTRAL_ADAPTER = MistralAdapter()
+
+
+def get_adapter(tokenizer: AutoTokenizer) -> DefaultAdapter | MistralAdapter:
+    """Return the ToolCallAdapter for this tokenizer's model family."""
+    tmpl = getattr(tokenizer, "chat_template", "") or ""
+    if "[SYSTEM_PROMPT]" in tmpl:
+        return _MISTRAL_ADAPTER
+    return _DEFAULT_ADAPTER
+
+
+# ---------------------------------------------------------------------------
+# Public prompt builder
+# ---------------------------------------------------------------------------
+def build_prompt(
+    messages: List[Message],
+    tokenizer: AutoTokenizer,
+    tools: Optional[List[Dict[str, Any]]] = None,
+    thinking: bool = True,
+) -> str:
+    if tools:
+        return get_adapter(tokenizer).build_prompt(messages, tokenizer, tools, thinking)
     return tokenizer.apply_chat_template(
-        msg_dicts,
-        tools=tools,
+        _build_msg_dicts(messages, thinking),
         tokenize=False,
         add_generation_prompt=True,
     )
@@ -180,7 +291,7 @@ _agent_json_decoder = json.JSONDecoder()
 def _extract_agent_json(text: str) -> str:
     pos = 0
     while pos < len(text):
-        start = text.find('{', pos)
+        start = text.find("{", pos)
         if start == -1:
             break
         try:
@@ -194,54 +305,20 @@ def _extract_agent_json(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# OpenAI-format tool call parser
-# Handles two formats:
-#   Qwen3:   <tool_call>{"name": ..., "arguments": ...}</tool_call>
-#   Mistral: function_name{"key": "value"}   (entire output is the call)
+# Public tool-call parser
+# Delegates to the correct adapter when the tokenizer is known.
+# Falls back to trying both formats in order when called without a tokenizer.
 # ---------------------------------------------------------------------------
-_MISTRAL_CALL_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)(\{.*\})\s*$', re.DOTALL)
-
-
-def parse_tool_calls(text: str):
-    # Qwen3 XML format
-    pattern = r'<tool_call>\s*(.*?)\s*</tool_call>'
-    matches = re.findall(pattern, text, re.DOTALL)
-    if matches:
-        tool_calls = []
-        for m in matches:
-            try:
-                data = json.loads(m)
-                tool_calls.append({
-                    "id": f"call_{uuid.uuid4().hex[:8]}",
-                    "type": "function",
-                    "function": {
-                        "name": data["name"],
-                        "arguments": json.dumps(data.get("arguments", {})),
-                    },
-                })
-            except (json.JSONDecodeError, KeyError):
-                log.warning(f"Failed to parse tool_call JSON: {m[:100]}")
-        remaining = re.sub(pattern, '', text, flags=re.DOTALL).strip()
-        return (tool_calls or None), remaining
-
-    # Mistral format: function_name{...}
-    hit = _MISTRAL_CALL_RE.match(text.strip())
-    if hit:
-        fn_name, args_str = hit.group(1), hit.group(2)
-        try:
-            args = json.loads(args_str)
-            return [{
-                "id": f"call_{uuid.uuid4().hex[:8]}",
-                "type": "function",
-                "function": {
-                    "name": fn_name,
-                    "arguments": json.dumps(args),
-                },
-            }], ""
-        except json.JSONDecodeError:
-            log.warning(f"Failed to parse Mistral tool_call args: {args_str[:100]}")
-
-    return None, text.strip()
+def parse_tool_calls(
+    text: str,
+    tokenizer: Optional[AutoTokenizer] = None,
+) -> tuple[list[dict] | None, str]:
+    if tokenizer is not None:
+        return get_adapter(tokenizer).parse_tool_calls(text)
+    result = _DEFAULT_ADAPTER.parse_tool_calls(text)
+    if result[0]:
+        return result
+    return _MISTRAL_ADAPTER.parse_tool_calls(text)
 
 
 # ---------------------------------------------------------------------------
@@ -263,17 +340,20 @@ def decode_result(raw) -> str:
 # Thinking block extraction and formatting
 # ---------------------------------------------------------------------------
 def extract_thinking(raw_text: str):
-    think_match = re.search(r'<think>(.*?)</think>', raw_text, flags=re.DOTALL)
+    think_match = re.search(r"<think>(.*?)</think>", raw_text, flags=re.DOTALL)
     if think_match:
         thinking = think_match.group(1).strip()
-        answer = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL).strip()
+        answer = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
         return thinking, answer
 
     # Unclosed <think> — model hit max_tokens mid-thought
-    unclosed = re.search(r'<think>(.*)', raw_text, flags=re.DOTALL)
+    unclosed = re.search(r"<think>(.*)", raw_text, flags=re.DOTALL)
     if unclosed:
         thinking = unclosed.group(1).strip()
-        log.warning(f"Unclosed <think> block — model likely hit max_tokens mid-thought ({len(thinking)} chars)")
+        log.warning(
+            f"Unclosed <think> block — model likely hit max_tokens mid-thought "
+            f"({len(thinking)} chars)"
+        )
         answer = raw_text[:unclosed.start()].strip()
         if not answer:
             answer = "*(thinking was cut off by max_tokens limit)*"
@@ -285,7 +365,7 @@ def extract_thinking(raw_text: str):
 def format_thinking(thinking: Optional[str], answer: str) -> str:
     if not thinking:
         return answer
-    lines = thinking.replace('\n', '\n> ')
+    lines = thinking.replace("\n", "\n> ")
     return f"> 💭 **Thinking...**\n> {lines}\n\n---\n\n{answer}"
 
 
@@ -299,6 +379,7 @@ class ThinkStreamHandler:
     strategy="separate_field" — precise/laborious: emit reasoning_content
                                 (Open WebUI compatible).
     """
+
     def __init__(self, strategy: str = "suppress") -> None:
         self.strategy = strategy
         self.buf = ""
@@ -306,7 +387,6 @@ class ThinkStreamHandler:
         self.think_acc = ""
 
     def feed(self, token: str) -> list[dict]:
-        """Return list of delta dicts to emit. May be empty while buffering."""
         self.buf += token
         out: list[dict] = []
         if not self.in_think:
@@ -330,5 +410,4 @@ class ThinkStreamHandler:
         return out
 
     def flush(self) -> list[dict]:
-        """Drain any remaining buffer at end of stream."""
         return [{"content": self.buf}] if self.buf and not self.in_think else []
