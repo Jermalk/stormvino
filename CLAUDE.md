@@ -94,13 +94,7 @@ FastAPI server exposing an OpenAI-compatible REST API (`/v1/chat/completions`, `
 
 ## Known Bugs / Sharp Edges
 
-| Location | Issue |
-|---|---|
-| `full_stream()` (line ~338) | Hardcoded `"id": "chatcmpl-x"` — should use `chunk_id` from `token_generator()` |
-| `format_thinking()` | Injects Markdown blockquote into `content` — breaks tool-call JSON if thinking is enabled |
-| `get_model()` (line 183) | Deprecated `asyncio.get_event_loop()` — use `asyncio.get_running_loop()` |
-| `get_embedding_model()` (line 207) | Same deprecated call |
-| Streaming stats | `stats.busy` can get stuck if `run_generation` raises before `finally` |
+*(All previously listed bugs fixed in b647cfb — section retained for future entries.)*
 
 ---
 
