@@ -23,7 +23,7 @@ from prompt_builder import (
     _text_content, build_vlm_prompt, build_prompt,
     _extract_agent_json, parse_tool_calls,
     decode_result, extract_thinking, format_thinking,
-    ThinkStreamHandler,
+    ThinkStreamHandler, has_images,
 )
 
 _request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
@@ -162,11 +162,7 @@ def _pil_to_ov_tensor(img: Image.Image):
     return ov.Tensor(np.array(img, dtype=np.uint8))
 
 
-def _has_images(messages: List["Message"]) -> bool:
-    return any(
-        isinstance(m.content, list) and any(p.type == "image_url" for p in m.content)
-        for m in messages
-    )
+_has_images = has_images  # alias — removed in Step 6
 
 
 def _extract_images(messages: List["Message"]) -> List[Image.Image]:

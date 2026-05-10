@@ -43,6 +43,13 @@ def _text_content(msg: Message) -> str:
     return msg.content or ""
 
 
+def has_images(messages: List[Message]) -> bool:
+    return any(
+        isinstance(m.content, list) and any(p.type == "image_url" for p in m.content)
+        for m in messages
+    )
+
+
 # ---------------------------------------------------------------------------
 # VLM prompt builder
 # AutoTokenizer used instead of AutoProcessor to avoid the torchvision

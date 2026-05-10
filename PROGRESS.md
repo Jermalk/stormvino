@@ -267,9 +267,9 @@
 
 ## NOW
 
-**Working on:** Module split — Step 2 complete (model_manager.py extracted)
-**Last commit:** refactor: Step 2 — extract model_manager.py
-**Next action:** Step 3 — add has_images() to prompt_builder.py (plans/20260510_PLAN_split.md)
+**Working on:** Module split — Step 3 complete (has_images added to prompt_builder.py)
+**Last commit:** refactor: Step 3 — add has_images() to prompt_builder.py
+**Next action:** Step 4 — extract catalogue.py (plans/20260510_PLAN_split.md)
 **Blocked on:** nothing
 **Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor.
-**Tests:** pass — /health OK, non-streaming chat OK, /v1/embeddings OK
+**Tests:** pass — /health OK after restart
