@@ -40,7 +40,7 @@
         "phi-4-int4-ov"
     ],
 
-    "image_model":     "sdxl-int8-ov",
+    "image_model":     "sdxl-fp16-ov",
     "image_device":    "GPU.1",
     "image_num_steps": 20,
 

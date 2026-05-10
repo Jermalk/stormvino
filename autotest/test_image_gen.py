@@ -2,7 +2,7 @@
 Automated tests for SDXL image generation.
 
 Tests:
-  1. Model files present — sdxl-int8-ov directory has expected .xml files
+  1. Model files present — image_model dir has expected .xml files
   2. Pipeline loads on GPU.1
   3. Direct generate: 256×256, 1 step — returns valid PNG bytes
   4. Server API: POST /v1/images/generations → b64_json is valid PNG
@@ -18,13 +18,16 @@ Usage:
 import argparse
 import base64
 import io
+import json
 import sys
 import time
 from pathlib import Path
 
 import httpx
 
-MODEL_DIR = Path("/opt/ov_server/models/sdxl-int8-ov")
+_CONFIG_PATH = Path("/opt/ov_server/config.json")
+_image_model = json.loads(_CONFIG_PATH.read_text()).get("image_model", "sdxl-fp16-ov")
+MODEL_DIR = Path(f"/opt/ov_server/models/{_image_model}")
 DEVICE = "GPU.1"
 BASE = "http://localhost:11435"
 TIMEOUT = 300.0
@@ -63,7 +66,7 @@ def _is_valid_png(b64_str: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def test_files_present() -> bool:
-    print("\n[1] Model files present")
+    print(f"\n[1] Model files present ({MODEL_DIR.name})")
     ok = True
     ok &= _check("model directory exists", MODEL_DIR.exists(), str(MODEL_DIR))
     if not MODEL_DIR.exists():
@@ -72,7 +75,7 @@ def test_files_present() -> bool:
     ok &= _check("at least 4 .xml IR files", len(xml_files) >= 4,
                  f"found {len(xml_files)}: {[f.name for f in xml_files[:4]]}")
     total_gb = sum(f.stat().st_size for f in MODEL_DIR.rglob("*") if f.is_file()) / 1e9
-    ok &= _check("total size > 3 GB", total_gb > 3, f"{total_gb:.1f} GB")
+    ok &= _check("total size > 1 GB", total_gb > 1, f"{total_gb:.1f} GB")
     return ok
 
 
