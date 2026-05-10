@@ -305,11 +305,31 @@
 
 ---
 
+### 2026-05-11 — Session 31 (76ece30)
+**Working on:** Server diagnostics — deadlock + model selection + VLM routing fixes
+**Last commit:** 76ece30 — fix: streaming deadlock + VLM routing + loaded-model preference
+**Next action:** basta-f1 — implement query_decisions MCP tool; or #session-wrap
+**Blocked on:** nothing
+**Open questions:** (1) Embedding threshold 0.72 needs tuning. (2) InternVLAdapter tool calling deferred.
+**Tests:** 176/176 unit tests pass; web search + Mistral tool call verified live
+
+---
+
+### 2026-05-11 — Session 32 (fbb157a)
+**Working on:** SDXL image generation + Whisper STT endpoints (overnight autonomous task)
+**Last commit:** fbb157a — feat: SDXL image generation + Whisper STT endpoints
+**Next action:** basta-f1 — implement query_decisions MCP tool; or embedding threshold 0.72 tuning
+**Blocked on:** nothing
+**Open questions:** (1) Embedding threshold 0.72 needs tuning. (2) InternVLAdapter tool calling deferred. (3) SDXL/Whisper share GPU.1 with LLM/VLM — contention under concurrent load untested.
+**Tests:** 7/7 image_gen, 8/8 stt pass; 176/176 unit tests pass
+
+---
+
 ## NOW
 
-**Working on:** Bug fixes + test suite restoration
-**Last commit:** dadb476 — fix: restore test suite after module split
-**Next action:** basta-f1 — implement query_decisions MCP tool (first in build order); or VRAM bar overcount fix in ov_monitor
+**Working on:** SDXL image generation + Whisper STT endpoints — complete
+**Last commit:** fbb157a — feat: SDXL image generation + Whisper STT endpoints
+**Next action:** basta-f1 query_decisions MCP tool; or embedding threshold 0.72 tuning
 **Blocked on:** nothing
-**Open questions:** (1) STT Phase 1 queued. (2) Embedding threshold 0.72 needs tuning. (3) VRAM bar overcount in ov_monitor. (4) InternVLAdapter tool calling deferred.
-**Tests:** 176/176 unit tests pass; 7/7 internvl integration tests pass
+**Open questions:** (1) Embedding threshold 0.72 needs tuning. (2) InternVLAdapter tool calling deferred. (3) SDXL/Whisper share GPU.1 with LLM/VLM — concurrent load contention untested.
+**Tests:** 7/7 image_gen, 8/8 stt, 176/176 unit — all pass

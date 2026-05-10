@@ -4,4 +4,4 @@
 > Format: bullet points, max 5 lines per topic, no prose.
 
 ## Carried over:
-Session 30: InternVL2.5-26B abandoned (3 download failures at 4.6GB shard); switched to 8B (~4.7GB INT4, loads in 4s). Two fixes needed: trust_remote_code=True for VLM tokenizer; _vlm_content() flattens list content to string for simple jinja templates (InternVL). Image inference works (test 4+6 pass). Tests 3+7 fail due to hf-hub version conflict in test runner only — server unaffected. Dynamic KV sizing: compute_kv_cache_gb() in server_config.py reads config.json architecture. basta-f1 project created at /home/jerzy/basta-f1 with S2A/CMM design, Postgres schema, build order (query_decisions first).
+Session 32: SDXL (sdxl-int8-ov, 3.5GB, GPU.1) + Whisper (whisper-large-v3-int8-ov, 1.57GB, GPU.1) integrated. Two bugs fixed: (1) tensor.data needed for OV Tensor → numpy conversion (Text2ImagePipeline output); (2) WhisperGenerationConfig(existing_cfg) invalid — use pipe.get_generation_config() and mutate directly. Both share GPU.1 with LLM/VLM — no contention policy yet. All tests green: 7/7 image_gen, 8/8 stt, 176/176 unit. basta-f1 query_decisions MCP tool still pending.

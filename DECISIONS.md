@@ -12,6 +12,18 @@
 **Rejected alternative:** Adopt all standards as-is — risks false safety from wrong Python version features and dangerous mock coverage.
 **Affects:** coding_standards_python.json, CLAUDE.md
 
+### 2026-05-11 — Image/STT pipeline modules isolated from ov_server.py
+**Decision:** image_pipeline.py and stt_pipeline.py are standalone modules with module-level singletons and asyncio locks; ov_server.py imports and calls them.
+**Rationale:** Same pattern as model_manager.py — avoids circular imports, keeps ov_server.py as a thin HTTP layer, pipeline logic is testable in isolation (test_image_gen.py tests 1-3 run without a server).
+**Rejected alternative:** Inline pipeline code in ov_server.py — would grow the file past 1000 lines and make testing require a full server.
+**Affects:** image_pipeline.py, stt_pipeline.py, ov_server.py
+
+### 2026-05-11 — Use ov_genai.Text2ImagePipeline + WhisperPipeline (native OV)
+**Decision:** Use pre-converted INT8 OV models from OpenVINO HuggingFace org; use native ov_genai classes only.
+**Rationale:** optimum-intel is broken due to huggingface-hub==1.4.1 vs transformers<1.0 conflict. Native ov_genai pipelines (Text2ImagePipeline, WhisperPipeline) require no optimum-intel at runtime and are the upstream-recommended path for OV 2026.x.
+**Rejected alternative:** Convert models via optimum-cli — blocked by dependency conflict in this venv.
+**Affects:** image_pipeline.py, stt_pipeline.py, config.json
+
 ### 2026-05-10 — Module split plan: shared mutable state via _cfg dict
 **Decision:** Mutable globals (DEFAULT_MODEL, AGENT_MODEL, MAX_LOADED_MODELS) to be stored in _cfg dict, not as module-level constants. All modules import _cfg by reference from server_config.py.
 **Rationale:** Python import bindings are local copies — reassigning a module-level name in one module is invisible to others. Dicts are shared by reference. _apply_profile() mutations to _cfg["max_loaded_models"] are immediately visible to model_manager.py without any special wiring.
