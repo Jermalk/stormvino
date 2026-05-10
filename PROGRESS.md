@@ -307,9 +307,9 @@
 
 ## NOW
 
-**Working on:** Known bug fixes — format_thinking markdown injection + gen_task finally guard
-**Last commit:** b647cfb — fix: replace format_thinking markdown injection + guard gen_task in finally
-**Next action:** Fix test_pure.py import breakage (_build_catalogue moved to catalogue.py in session 27); or basta-f1 query_decisions tool; or test_internvl failures
+**Working on:** Bug fixes + test suite restoration
+**Last commit:** dadb476 — fix: restore test suite after module split
+**Next action:** basta-f1 — implement query_decisions MCP tool (first in build order); or VRAM bar overcount fix in ov_monitor
 **Blocked on:** nothing
-**Open questions:** (1) STT Phase 1 queued. (2) Embedding threshold 0.72 needs tuning. (3) VRAM bar overcount in ov_monitor. (4) InternVLAdapter tool calling deferred. (5) test_internvl 3+7 hf-hub env issue. (6) test_pure.py collection error — _build_catalogue import broken since module split.
-**Tests:** server smoke test pass (non-streaming + streaming verified); test_pure.py uncollectable (pre-existing)
+**Open questions:** (1) STT Phase 1 queued. (2) Embedding threshold 0.72 needs tuning. (3) VRAM bar overcount in ov_monitor. (4) InternVLAdapter tool calling deferred.
+**Tests:** 176/176 unit tests pass; 7/7 internvl integration tests pass
