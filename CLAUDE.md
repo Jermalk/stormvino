@@ -227,6 +227,12 @@ On re-entry: if non-empty, read aloud and ask user before proceeding (bootstrap 
 - Environment variables via `os.environ.get()` with defaults — never hardcoded paths except `MODELS_DIR` (already parameterised).
 - Async blocking work via `loop.run_in_executor(None, ...)` — never `await` a CPU-bound call directly.
 - Use `asyncio.get_running_loop()` — not deprecated `get_event_loop()`.
+- **Typing — 1st order (always apply):**
+  - `Literal` for categorical sentinels: `finish_reason`, device names, profile names, `PERFORMANCE_HINT` values.
+  - Modern generics: `X | None` not `Optional[X]`; `list[str]` not `List[str]`; remove all legacy `typing` imports.
+  - `# type: ignore` at `openvino_genai` boundaries — no published stubs; annotate and move on.
+  - Domain-specific names: `stream_chunk`, `token_count`, `raw_payload` — not `data`, `output`, `result`.
+- **Typing — 2nd order:** See `coding_standards_python.json` (TypedDict, TypeAlias, Protocol, TypeVar). Apply only when the stated `apply_when` condition is met — not by default.
 
 ---
 
@@ -236,6 +242,7 @@ On re-entry: if non-empty, read aloud and ask user before proceeding (bootstrap 
 |---|---|
 | `ov_server.py` | Single-file server — keep it that way unless a module exceeds ~200 lines of distinct concern |
 | `config.json` | Runtime config: models_dir, device, model names, limits. Falls back to defaults if absent. |
+| `coding_standards_python.json` | Python typing and clean-code standards. 1st-order rules are inlined above; load this file only for 2nd-order techniques (TypedDict, TypeAlias, Protocol, TypeVar). |
 | `README.md` | User-facing commands — **keep in sync** with any endpoint/startup/network changes |
 | `MODELS.md` | Model conversion guide, directory layout, VRAM sizing, adding/removing models |
 | `PROGRESS.md` | Build progress — read NOW section only on re-entry |

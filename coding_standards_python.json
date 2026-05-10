@@ -1,0 +1,128 @@
+{
+  "instruction_set": {
+    "role": "Expert Python & Data Science Developer",
+    "objective": "Enhance Python code maintainability and clarity using modern static typing techniques. Apply these pragmatically to prevent runtime errors and improve developer experience (IDE completion/documentation).",
+    "guiding_principle": "Type hints are a tool for clarity and safety, not a dogmatic requirement. Prioritize typing for complex data structures, public APIs, and multi-stage transformations where silent failures are costly.",
+    "optimization_orders": {
+      "first": "Apply immediately — direct payoff, low risk, no prerequisites.",
+      "second": "Apply only when the complexity genuinely warrants it. Not by default, not speculatively. Each entry states the condition that triggers it."
+    },
+    "typing_techniques": [
+      {
+        "name": "Categorical Constraint",
+        "tool": "Literal",
+        "order": 1,
+        "peps": ["PEP 586"],
+        "use_case": "Restricting string or integer inputs to a specific set of valid values (e.g., finish_reason, device names, PERFORMANCE_HINT values, profile names).",
+        "benefit": "Enables IDE autocomplete and catches typos before execution — silent wrong-value bugs, not exceptions."
+      },
+      {
+        "name": "Handling Uncertainty",
+        "tool": "Union Types (|)",
+        "order": 1,
+        "peps": ["PEP 604"],
+        "use_case": "Handling values that can be multiple types or might be None. Use X | None instead of Optional[X]; list[str] instead of List[str]; dict[str, int] instead of Dict[str, int].",
+        "note": "Python 3.12+ supports built-in generics natively. Replace all legacy typing imports (Optional, Dict, List, Tuple, Union) with | syntax and built-in generics."
+      },
+      {
+        "name": "Structural Schema Definition",
+        "tool": "TypedDict",
+        "order": 2,
+        "apply_when": "A bare dict is passed between three or more functions and its shape is non-obvious. Do NOT use where Pydantic BaseModel already owns the boundary — that creates two competing schema systems.",
+        "peps": ["PEP 589", "PEP 655", "PEP 705"],
+        "use_case": "Describing the shape of internal structures not covered by Pydantic: config.json layout, internal stats dicts, catalogue entry dicts.",
+        "features": {
+          "OptionalFields": "Use NotRequired[] for keys that may be absent.",
+          "Immutability": "Use ReadOnly[] for fields that should not be modified."
+        },
+        "warning": "Do not use closed=True — requires Python 3.15+. Project runs Python 3.12."
+      },
+      {
+        "name": "Abbreviating Complexity",
+        "tool": "TypeAlias",
+        "order": 2,
+        "apply_when": "The same complex nested type appears in three or more function signatures. Do not create an alias for a type used in only one place.",
+        "use_case": "Simplifying deeply nested structures to readable, domain-specific names (e.g., ModelRegistry = dict[str, LLMPipeline]).",
+        "benefit": "Improves readability — but only when the type genuinely recurs."
+      },
+      {
+        "name": "Behavioral/Structural Typing",
+        "tool": "Protocol",
+        "order": 2,
+        "apply_when": "A second concrete implementation exists or is actively being built (e.g., a mock LLM backend for testing). Do not introduce Protocol for a type with a single concrete implementation — it adds abstraction with no polymorphism benefit.",
+        "peps": ["PEP 544"],
+        "use_case": "Defining what an object can do rather than what it is. Primary candidate: an LLMBackend Protocol enabling a fake pipeline for unit tests without touching OpenVINO.",
+        "runtime": "Use @runtime_checkable only if isinstance() checks are required."
+      },
+      {
+        "name": "Shape Preservation",
+        "tool": "TypeVar / Generics",
+        "order": 2,
+        "apply_when": "A function processes a container while preserving the item type AND is called with multiple distinct concrete types. Do not introduce generics for single-type or purely internal utilities.",
+        "use_case": "Functions that act on data while preserving the internal type, eliminating the need for Any.",
+        "benefit": "Ensures that if an int-list goes in, the checker knows an int comes out — but only introduce when a genuine generic pattern emerges organically."
+      }
+    ],
+    "clean_code_standards": {
+      "naming_conventions": {
+        "domain_clarity": "Use domain-specific terminology (e.g., 'prompt', 'completion', 'token_count', 'stream_chunk') over generic names like 'data' or 'output'.",
+        "intent_revealing": "Functions should be verbs (e.g., 'tokenize_input', 'validate_request') and variables should be nouns representing the actual content (e.g., 'raw_request_payload')."
+      },
+      "function_design": {
+        "single_responsibility": "Each function must do one thing. If an API handler validates, transforms, and calls the engine, split it into three distinct functions.",
+        "side_effects": "Prefer pure functions for data transformations. Ensure functions that interact with the local LLM engine are clearly isolated from logic that formats the OpenAI-compatible response."
+      },
+      "complexity_management": {
+        "fail_fast": "Validate parameter ranges (temperature, top_p) immediately at the entry point using Pydantic or guard clauses.",
+        "expressive_logic": "Avoid deeply nested if/else blocks. Use early returns and guard clauses to keep the 'happy path' at the lowest indentation level."
+      }
+    },
+    "tdd_and_coverage": {
+      "strategy": {
+        "red_green_refactor": {
+          "order": 2,
+          "apply_when": "Applicable to validation, routing, and response-formatting layers. Impractical for the inference path until an LLMBackend Protocol abstraction exists.",
+          "description": "Write a failing test for a new parameter or transformation before implementing it. Ensures the OpenAI-compatibility layer matches the spec."
+        },
+        "mocking": {
+          "scope": "Mock only pure logic layers: parameter validation, prompt building, response formatting, catalogue routing.",
+          "warning": "Do NOT mock the async streaming infrastructure (AsyncTokenStreamer, event loop, queue). The thread/event-loop interaction is where production bugs occur. Only integration tests with a live pipeline can catch those failures."
+        }
+      },
+      "coverage_targets": {
+        "order": 2,
+        "apply_when": "Meaningful only after validation and transformation layers have dedicated test modules. Do not set project-wide coverage targets until the LLM backend is abstracted behind a Protocol.",
+        "logic_paths": "Target >90% in transformation and validation layers only. Edge cases — None in optional parameters, malformed JSON payloads — must be covered.",
+        "integration_tests": "Maintain integration tests that verify actual HTTP responses against the OpenAI API specification using httpx against the live server."
+      },
+      "testing_tools": {
+        "framework": "pytest",
+        "plugins": [
+          "pytest-asyncio (for async API handlers)",
+          "pytest-cov (for tracking coverage metrics)",
+          "httpx (for testing live server endpoints)"
+        ]
+      }
+    },
+    "implementation_strategy": {
+      "priority_targets": [
+        "API response parsing",
+        "Complex data transformation signatures",
+        "Parameter validation entry points"
+      ],
+      "checkers_to_support": [
+        "mypy",
+        "pyright",
+        "ty (Astral)"
+      ],
+      "avoid_overengineering": [
+        "Do not type hint simple, short-lived scripts or rapid prototypes.",
+        "Use # type: ignore or typing.cast() when third-party library stubs are missing or incorrect — openvino_genai has no published stubs; annotate the boundary and move on.",
+        "Avoid forced typing if it significantly obscures logic or creates TypeVar soup that hinders readability."
+      ]
+    },
+    "verification_helpers": {
+      "reveal_type": "Use reveal_type(variable) during development to debug complex generic inference."
+    }
+  }
+}
