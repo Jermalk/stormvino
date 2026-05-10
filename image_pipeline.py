@@ -68,10 +68,16 @@ async def get_image_pipeline(model_dir: str, device: str):
         log.info(f"Loading image pipeline from {model_dir} on {device}...")
         try:
             import openvino_genai as ov_genai
-            _image_pipe = await loop.run_in_executor(
-                None,
-                lambda: ov_genai.Text2ImagePipeline(model_dir, device)
-            )
+            import model_manager
+
+            def _load() -> "ov_genai.Text2ImagePipeline":
+                size_gb = sum(
+                    f.stat().st_size for f in Path(model_dir).rglob("*") if f.is_file()
+                ) / 1024 ** 3
+                model_manager.evict_to_fit(size_gb)
+                return ov_genai.Text2ImagePipeline(model_dir, device)
+
+            _image_pipe = await loop.run_in_executor(None, _load)
             _image_model_id = Path(model_dir).name
             log.info(f"Image pipeline loaded in {time.perf_counter() - t0:.1f}s")
         except Exception as exc:

@@ -153,6 +153,26 @@ def _evict_lru() -> str:
     return lru
 
 
+def evict_to_fit(needed_gb: float) -> list[str]:
+    """Evict LRU LLMs until vram_free_gb() >= needed_gb + VRAM_HEADROOM_GB.
+
+    Called by external pipelines (image, STT) before loading. No-op when VRAM
+    tracking is unavailable. Returns list of evicted model IDs.
+    """
+    evicted: list[str] = []
+    free = vram_free_gb()
+    if free is None:
+        return evicted
+    required = needed_gb + VRAM_HEADROOM_GB
+    while free < required and loaded_models:
+        mid = _evict_lru()
+        evicted.append(mid)
+        free = vram_free_gb()
+    if evicted:
+        log.info(f"[evict_to_fit] evicted {evicted} — freed for {needed_gb:.1f}GB pipeline load")
+    return evicted
+
+
 # ---------------------------------------------------------------------------
 # Profile-switch helpers (called by _apply_profile in ov_server.py)
 # ---------------------------------------------------------------------------
