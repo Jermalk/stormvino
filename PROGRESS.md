@@ -285,11 +285,21 @@
 
 ---
 
+### 2026-05-10 — Session 29 (7899ffb)
+**Working on:** ModelFamilyAdapter Protocol, InternVL2.5-26B integration + conversion, dynamic KV cache sizing
+**Last commit:** 7899ffb — feat: InternVL2.5-26B integration — multi-VLM routing, test suite, config
+**Next action:** When InternVL conversion finishes (~52GB download): run `python3 autotest/test_internvl.py --load-only`, restart server, run full suite
+**Blocked on:** InternVL2.5-26B conversion still downloading (3.8/52 GB at session end)
+**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor. (4) InternVLAdapter tool calling (InternLM2 `<|action_start|><|plugin|>` format) — deferred until model is validated on server.
+**Tests:** not run — server was not restarted; dynamic KV sizing verified with spot-check (Qwen3-14B → 7GB, Qwen2.5-VL → 3GB)
+
+---
+
 ## NOW
 
-**Working on:** Mistral tool-call support complete; web search autotest 4/4 both models
-**Last commit:** af6d74e — feat: Mistral tool-call support — _build_mistral_tool_prompt + dual-format parser
-**Next action:** n8n AI Agent node validation (tool call loop); or VRAM bar overcount fix in ov_monitor; or STT Phase 1
-**Blocked on:** nothing
-**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor. (4) Mistral tier="balanced" — promote to tier="fast" after real-traffic validation?
-**Tests:** pass — 4/4 qwen3-14b + 4/4 mistral-small-3.2-24b (autotest/test_web_search.py)
+**Working on:** Dynamic KV cache sizing complete; InternVL2.5-26B conversion in background
+**Last commit:** 7899ffb — feat: InternVL2.5-26B integration — multi-VLM routing, test suite, config
+**Next action:** When download finishes: `python3 autotest/test_internvl.py --load-only`, then restart server, then `python3 autotest/test_internvl.py`
+**Blocked on:** InternVL download (~3.8/52 GB done; PID 345796)
+**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor. (4) InternVLAdapter tool calling deferred until model validated.
+**Tests:** not run this session — dynamic KV spot-checked via python3 -c inline test

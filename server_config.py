@@ -6,6 +6,7 @@ To add a new config key: add default to _load_config(), add to _KNOWN_CONFIG_KEY
 """
 import json
 import logging
+import math
 import subprocess
 from pathlib import Path
 from typing import Dict
@@ -190,10 +191,74 @@ CONFIG     = {
 }
 
 
+def _detect_family_max_context(model_dir: Path) -> int:
+    """Read tokenizer_config.json to detect family → return max_context_tokens."""
+    tok_cfg_path = model_dir / "tokenizer_config.json"
+    if not tok_cfg_path.exists():
+        return 32_768
+    try:
+        with tok_cfg_path.open() as f:
+            tok_cfg = json.load(f)
+        chat_tmpl = tok_cfg.get("chat_template", "") or ""
+        if "[SYSTEM_PROMPT]" in chat_tmpl:
+            return 32_768  # MistralAdapter
+        special = str(tok_cfg.get("additional_special_tokens", []))
+        if "<IMG_CONTEXT>" in special:
+            return 8_192   # InternVLAdapter
+        return 32_768      # DefaultAdapter
+    except Exception:
+        return 32_768
+
+
+def compute_kv_cache_gb(
+    model_dir: Path,
+    max_context_tokens: int | None = None,
+    headroom: float = 1.25,
+    floor_gb: float = 1.0,
+) -> int:
+    """Compute KV cache size (GB) from model architecture.
+
+    Formula: num_layers × num_kv_heads × head_dim × 2 (K+V) × 2 bytes (FP16) × seq_len
+    """
+    cfg_path = model_dir / "config.json"
+    if not cfg_path.exists():
+        return int(_cfg.get("kv_cache_size_gb", 8))
+    try:
+        with cfg_path.open() as f:
+            mcfg = json.load(f)
+        num_layers    = int(mcfg.get("num_hidden_layers", 32))
+        num_attn      = int(mcfg.get("num_attention_heads", 32))
+        num_kv_heads  = int(mcfg.get("num_key_value_heads", num_attn))
+        hidden_size   = int(mcfg.get("hidden_size", 4096))
+        head_dim      = int(mcfg.get("head_dim", hidden_size // num_attn))
+        if max_context_tokens is None:
+            max_context_tokens = _detect_family_max_context(model_dir)
+        kv_bytes = num_layers * num_kv_heads * head_dim * 2 * 2 * max_context_tokens
+        kv_gb_raw = kv_bytes / 1e9
+        result = math.ceil(kv_gb_raw * headroom)
+        computed = max(result, math.ceil(floor_gb))
+        log.debug(
+            f"KV cache {model_dir.name}: {num_layers}L×{num_kv_heads}KVh×{head_dim}d "
+            f"ctx={max_context_tokens} → {kv_gb_raw:.2f}GB×{headroom} = {computed}GB"
+        )
+        return computed
+    except Exception as e:
+        log.warning(f"KV cache compute failed for {model_dir.name}: {e} — using global default")
+        return int(_cfg.get("kv_cache_size_gb", 8))
+
+
 def _model_kv_gb(model_id: str) -> int:
-    """Return KV cache size (GB) for model_id, checking model_kv_overrides first."""
+    """Return KV cache size (GB) for model_id.
+
+    Priority: model_kv_overrides > architecture formula > global default.
+    """
     overrides = _cfg.get("model_kv_overrides", {})
-    return int(overrides.get(model_id, _cfg.get("kv_cache_size_gb", 8)))
+    if model_id in overrides:
+        return int(overrides[model_id])
+    model_dir = MODELS_DIR / model_id
+    if model_dir.exists():
+        return compute_kv_cache_gb(model_dir)
+    return int(_cfg.get("kv_cache_size_gb", 8))
 
 
 def get_scheduler_config(kv_override: int | None = None) -> ov_genai.SchedulerConfig:

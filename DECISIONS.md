@@ -335,3 +335,11 @@
 **Rationale:** AnythingLLM @agent injects thousands of tokens of tool descriptions into the system prompt, causing every @agent request to trip the 4000-token gate and route to document/phi-4, evicting whatever was loaded. System prompts are application boilerplate, not user content. Long user documents appear in user messages.
 **Rejected alternative:** Raise the threshold — would break legitimate long-document detection.
 **Affects:** ov_server.py `_detect_signal()`
+
+---
+
+### 2026-05-10 — Dynamic KV cache sizing from model architecture
+**Decision:** Replace global `kv_cache_size_gb` constant with per-model formula: `num_layers × num_kv_heads × head_dim × 2 (K+V) × 2 bytes (FP16) × max_context_tokens × 1.25 headroom`, reading architecture from model's `config.json` and context ceiling from adapter family.
+**Rationale:** A single 8GB constant was wrong in both directions: Qwen2.5-VL-7B only needs 3GB (wasted VRAM), Phi-4 and Qwen2.5-Coder-14B need 9GB (underprovided). Family context ceiling is read from `tokenizer_config.json` without loading the full tokenizer, avoiding a load-order problem (tokenizer currently loads AFTER pipeline).
+**Rejected alternative:** Move tokenizer load before pipeline to get adapter from the live tokenizer object — adds latency to every model load; JSON file read is faster and sufficient.
+**Affects:** server_config.py `compute_kv_cache_gb()`, `_detect_family_max_context()`, `_model_kv_gb()`
