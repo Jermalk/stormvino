@@ -11,9 +11,9 @@
     },
 
     "max_loaded_models":      1,
-    "kv_cache_size_gb":       6,
+    "kv_cache_size_gb":       8,
     "vram_headroom_gb":       1.5,
-    "max_ram_percent":        75.0,
+    "max_ram_percent":        85.0,
     "max_new_tokens_default": 2048,
     "vlm_max_image_turns":    1,
     "vlm_max_image_side_px":  1280,
@@ -22,7 +22,7 @@
 
     "postgres_dsn":   "postgresql://ov_server:ov_server@localhost/ov_metrics",
 
-    "provider_scope": "local+ovh",
+    "provider_scope": "local",
     "active_profile": "fast",
 
     "providers": {
@@ -37,10 +37,7 @@
     "default_model": "qwen3-14b-int4-ov",
     "agent_model":   "qwen3-14b-int4-ov",
     "blocked_models": [
-        "phi-4-int4-ov",
-        "qwen3-30b-a3b-int4-ov",
-        "qwen3-30b-a3b-int4-ov-bak",
-        "qwen3-coder-30b-a3b-int4-ov"
+        "phi-4-int4-ov"
     ],
 
     "model_kv_overrides": {},
@@ -100,8 +97,9 @@
             "description": "Search the web, find current events, retrieve live information",
             "signal":      "has_tools",
             "models": [
-                { "id": "qwen3-14b-int4-ov",       "provider": "loc", "tier": "fast" },
-                { "id": "Qwen3-32B",               "provider": "ovh", "tier": "best" }
+                { "id": "qwen3-14b-int4-ov",              "provider": "loc", "tier": "fast" },
+                { "id": "mistral-small-3.2-24b-int4-ov",  "provider": "loc", "tier": "balanced" },
+                { "id": "Qwen3-32B",                      "provider": "ovh", "tier": "best" }
             ]
         },
         "document": {
@@ -109,17 +107,18 @@
             "signal":      "long_context",
             "context_threshold_tokens": 4000,
             "models": [
-                { "id": "qwen3-14b-int4-ov",      "provider": "loc", "tier": "fast" },
-                { "id": "qwen3-14b-int4-ov",      "provider": "loc", "tier": "balanced" },
-                { "id": "Qwen3-32B",              "provider": "ovh", "tier": "fast" },
-                { "id": "gpt-oss-120b",           "provider": "ovh", "tier": "best" }
+                { "id": "qwen3-14b-int4-ov",              "provider": "loc", "tier": "fast" },
+                { "id": "mistral-small-3.2-24b-int4-ov",  "provider": "loc", "tier": "balanced" },
+                { "id": "Qwen3-32B",                      "provider": "ovh", "tier": "fast" },
+                { "id": "gpt-oss-120b",                   "provider": "ovh", "tier": "best" }
             ]
         },
         "code": {
             "description": "Write, debug, explain, or refactor code",
             "models": [
-                { "id": "qwen2.5-coder-14b-int4",        "provider": "loc", "tier": "fast" },
-                { "id": "Qwen3-Coder-480B-A35B",          "provider": "ovh", "tier": "best" }
+                { "id": "qwen2.5-coder-14b-int4",         "provider": "loc", "tier": "fast" },
+                { "id": "mistral-small-3.2-24b-int4-ov",  "provider": "loc", "tier": "balanced" },
+                { "id": "Qwen3-Coder-480B-A35B",           "provider": "ovh", "tier": "best" }
             ]
         },
         "general": {
@@ -136,9 +135,9 @@
                 "jak zaplanować wakacje"
             ],
             "models": [
-                { "id": "qwen3-14b-int4-ov","provider": "loc", "tier": "fast" },
-                { "id": "qwen3-14b-int4-ov","provider": "loc", "tier": "balanced" },
-                { "id": "Qwen3-32B",        "provider": "ovh", "tier": "best" }
+                { "id": "qwen3-14b-int4-ov",             "provider": "loc", "tier": "fast" },
+                { "id": "mistral-small-3.2-24b-int4-ov", "provider": "loc", "tier": "balanced" },
+                { "id": "Qwen3-32B",                     "provider": "ovh", "tier": "best" }
             ]
         }
     },
