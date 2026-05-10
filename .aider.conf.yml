@@ -1,0 +1,58 @@
+# .aider.conf.yml — Aider configuration for ov_server
+#
+# DEFAULT: pure local inference via ov_server (zero cloud cost, dogfooding).
+# Model: qwen3-30b-a3b-int4-ov running on local Intel Arc GPU via ov_server.
+#
+# SWITCHING MODES — comment/uncomment the relevant blocks:
+#   Mode A (default): Qwen3-30b for all roles — mechanical tasks, type annotations
+#   Mode B: Claude architect + Qwen editor — tasks needing reasoning + mechanical edits
+#   Mode C: Claude only — complex multi-file changes (use Claude Code instead)
+
+# ── Mode A: pure local ────────────────────────────────────────────────────────
+model: openai/qwen3-30b-a3b-int4-ov
+openai-api-base: http://localhost:11435/v1
+openai-api-key: local          # ov_server requires no auth; Aider needs a non-empty value
+
+# ── Mode B: architect mode (comment out Mode A above, uncomment this block) ──
+# architect: true
+# model: claude-sonnet-4-6                  # architect: reasons about the change
+# editor-model: openai/qwen3-30b-a3b-int4-ov  # editor: writes the actual code
+# editor-openai-api-base: http://localhost:11435/v1
+# editor-openai-api-key: local
+
+# ── Context ───────────────────────────────────────────────────────────────────
+# Always inject project conventions as read-only context (not editable by Aider)
+read:
+  - CONVENTIONS.md
+
+# Repo map — how many tokens to spend on the codebase overview.
+# 1024 is enough to see all module signatures without crowding the prompt.
+map-tokens: 1024
+
+# ── Git ───────────────────────────────────────────────────────────────────────
+auto-commits: true
+
+# Match the project's existing commit style (imperative, no "chore(aider):" prefix)
+commit-prompt: |
+  Write a concise git commit message in imperative mood, max 72 characters.
+  Do not prefix with "chore(aider):" or "feat(aider):".
+  Match the style of recent commits in this repo.
+  One line only unless a short body is genuinely needed.
+
+# ── Files Aider should never propose edits to ─────────────────────────────────
+# (also add to .aiderignore for repo-map exclusion)
+no-suggest-shell-commands: true
+
+# ── Suitable tasks for this setup ─────────────────────────────────────────────
+# Good fit (Mode A):
+#   - Add Literal types to a single module
+#   - Replace legacy typing imports (Optional → |, Dict → dict)
+#   - Rename a variable or function within one file
+#   - Add a simple new endpoint following an existing pattern
+#   - Write an isolated unit test for a pure function
+#
+# Requires Mode B or Claude Code instead:
+#   - Changes spanning 3+ files
+#   - Async/streaming bugs (thread + event loop interaction)
+#   - Architectural decisions (new module, new state)
+#   - Anything touching model_manager.py async paths

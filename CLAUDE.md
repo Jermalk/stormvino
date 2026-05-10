@@ -233,6 +233,7 @@ On re-entry: if non-empty, read aloud and ask user before proceeding (bootstrap 
   - `# type: ignore` at `openvino_genai` boundaries — no published stubs; annotate and move on.
   - Domain-specific names: `stream_chunk`, `token_count`, `raw_payload` — not `data`, `output`, `result`.
 - **Typing — 2nd order:** See `coding_standards_python.json` (TypedDict, TypeAlias, Protocol, TypeVar). Apply only when the stated `apply_when` condition is met — not by default.
+- **Conventions for AI coding tools:** See `CONVENTIONS.md` — update it whenever a module is added or ownership changes.
 
 ---
 
@@ -243,6 +244,8 @@ On re-entry: if non-empty, read aloud and ask user before proceeding (bootstrap 
 | `ov_server.py` | Single-file server — keep it that way unless a module exceeds ~200 lines of distinct concern |
 | `config.json` | Runtime config: models_dir, device, model names, limits. Falls back to defaults if absent. |
 | `coding_standards_python.json` | Python typing and clean-code standards. 1st-order rules are inlined above; load this file only for 2nd-order techniques (TypedDict, TypeAlias, Protocol, TypeVar). |
+| `CONVENTIONS.md` | Machine-facing coding conventions for AI tools (Aider, Qwen, etc.). Module map, import rules, how-to recipes. Keep in sync with CLAUDE.md when modules change. |
+| `.aider.conf.yml` | Aider persistent config: default model (Qwen3-30b via ov_server), conventions context, architect-mode comments. |
 | `README.md` | User-facing commands — **keep in sync** with any endpoint/startup/network changes |
 | `MODELS.md` | Model conversion guide, directory layout, VRAM sizing, adding/removing models |
 | `PROGRESS.md` | Build progress — read NOW section only on re-entry |
