@@ -77,12 +77,73 @@ def build_vlm_prompt(messages: List[Message], tokenizer: AutoTokenizer) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Mistral template detection and manual prompt builder.
+#
+# The anthracite-core text-only variant uses LlamaTokenizerFast with a
+# [SYSTEM_PROMPT][INST] template that silently drops tools= and raises on
+# role="tool".  We detect this template and build the prompt manually:
+#   - tools injected as [AVAILABLE_TOOLS]{json}[/AVAILABLE_TOOLS] in system
+#   - role="tool" rendered as [TOOL_RESULTS][{"content":...}][/TOOL_RESULTS]
+#   - prior assistant tool_calls rendered as function_name{args}</s>
+# ---------------------------------------------------------------------------
+def _is_mistral_template(tokenizer: AutoTokenizer) -> bool:
+    tmpl = getattr(tokenizer, "chat_template", "") or ""
+    return "[SYSTEM_PROMPT]" in tmpl
+
+
+def _build_mistral_tool_prompt(
+    messages: List[Message],
+    tokenizer: AutoTokenizer,
+    tools: List[Dict[str, Any]],
+) -> str:
+    bos = tokenizer.bos_token or "<s>"
+    eos = tokenizer.eos_token or "</s>"
+
+    # Collect system text; strip any leading system message from loop
+    sys_text = "You are a helpful assistant."
+    loop_messages = messages
+    if messages and messages[0].role == "system":
+        sys_text = _text_content(messages[0])
+        loop_messages = messages[1:]
+
+    tools_block = f"[AVAILABLE_TOOLS]{json.dumps(tools, ensure_ascii=False)}[/AVAILABLE_TOOLS]"
+    parts = [bos, f"[SYSTEM_PROMPT]{tools_block}\n{sys_text}[/SYSTEM_PROMPT]"]
+
+    for m in loop_messages:
+        if m.role == "user":
+            parts.append(f"[INST]{_text_content(m)}[/INST]")
+        elif m.role == "assistant":
+            if m.tool_calls:
+                # Prior assistant turn that called tools — reproduce function_name{args} format
+                for tc in m.tool_calls:
+                    fn = tc.get("function", {})
+                    try:
+                        args = json.loads(fn.get("arguments", "{}"))
+                    except json.JSONDecodeError:
+                        args = {}
+                    parts.append(f'{fn["name"]}{json.dumps(args, ensure_ascii=False)}{eos}')
+            else:
+                text = _text_content(m)
+                if text:
+                    parts.append(f"{text}{eos}")
+        elif m.role == "tool":
+            content = _text_content(m)
+            parts.append(f"[TOOL_RESULTS][{json.dumps({'content': content}, ensure_ascii=False)}][/TOOL_RESULTS]")
+
+    return "".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # LLM prompt builder — delegates tool schema injection to the tokenizer's
 # Jinja template so Qwen3's native tool-call format is always correct.
+# For Mistral [SYSTEM_PROMPT][INST] templates, uses manual injection instead.
 # ---------------------------------------------------------------------------
 def build_prompt(messages: List[Message], tokenizer: AutoTokenizer,
                  tools: Optional[List[Dict[str, Any]]] = None,
                  thinking: bool = True) -> str:
+    if tools and _is_mistral_template(tokenizer):
+        return _build_mistral_tool_prompt(messages, tokenizer, tools)
+
     suffix = " /no_think" if not thinking else ""
     msg_dicts: List[Dict[str, Any]] = []
     has_system = any(m.role == "system" for m in messages)
@@ -133,29 +194,54 @@ def _extract_agent_json(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# OpenAI-format tool call parser — extracts <tool_call>…</tool_call> blocks
+# OpenAI-format tool call parser
+# Handles two formats:
+#   Qwen3:   <tool_call>{"name": ..., "arguments": ...}</tool_call>
+#   Mistral: function_name{"key": "value"}   (entire output is the call)
 # ---------------------------------------------------------------------------
+_MISTRAL_CALL_RE = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)(\{.*\})\s*$', re.DOTALL)
+
+
 def parse_tool_calls(text: str):
+    # Qwen3 XML format
     pattern = r'<tool_call>\s*(.*?)\s*</tool_call>'
     matches = re.findall(pattern, text, re.DOTALL)
-    if not matches:
-        return None, text
-    tool_calls = []
-    for m in matches:
+    if matches:
+        tool_calls = []
+        for m in matches:
+            try:
+                data = json.loads(m)
+                tool_calls.append({
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": data["name"],
+                        "arguments": json.dumps(data.get("arguments", {})),
+                    },
+                })
+            except (json.JSONDecodeError, KeyError):
+                log.warning(f"Failed to parse tool_call JSON: {m[:100]}")
+        remaining = re.sub(pattern, '', text, flags=re.DOTALL).strip()
+        return (tool_calls or None), remaining
+
+    # Mistral format: function_name{...}
+    hit = _MISTRAL_CALL_RE.match(text.strip())
+    if hit:
+        fn_name, args_str = hit.group(1), hit.group(2)
         try:
-            data = json.loads(m)
-            tool_calls.append({
+            args = json.loads(args_str)
+            return [{
                 "id": f"call_{uuid.uuid4().hex[:8]}",
                 "type": "function",
                 "function": {
-                    "name": data["name"],
-                    "arguments": json.dumps(data.get("arguments", {})),
+                    "name": fn_name,
+                    "arguments": json.dumps(args),
                 },
-            })
-        except (json.JSONDecodeError, KeyError):
-            log.warning(f"Failed to parse tool_call JSON: {m[:100]}")
-    remaining = re.sub(pattern, '', text, flags=re.DOTALL).strip()
-    return (tool_calls or None), remaining
+            }], ""
+        except json.JSONDecodeError:
+            log.warning(f"Failed to parse Mistral tool_call args: {args_str[:100]}")
+
+    return None, text.strip()
 
 
 # ---------------------------------------------------------------------------
