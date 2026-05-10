@@ -1228,9 +1228,45 @@ async def audio_transcriptions(
     return {"text": text}
 
 
+# ---------------------------------------------------------------------------
+# Monitor API — backend for monitor/src (Svelte web UI)
+# Served at /monitor/api/*; static dist served at /monitor via StaticFiles mount
+# (mount added in __main__ after middleware, only when dist/ exists)
+# ---------------------------------------------------------------------------
+
+@app.get("/monitor/api/metrics")
+async def monitor_metrics(metric: str = "tok_per_sec", minutes: int = 60):
+    """Time-series data from Postgres for uPlot charts.
+
+    Returns {ts: [unix_epoch, ...], values: [float, ...]}.
+    Supported metrics: tok_per_sec, elapsed_sec, total_tokens.
+    """
+    # TODO: implement — query ov_metrics.request_log
+    # SELECT EXTRACT(EPOCH FROM completed_at)::int AS ts, <metric>
+    # FROM request_log
+    # WHERE completed_at > NOW() - INTERVAL '<minutes> minutes'
+    # ORDER BY completed_at
+    return {"ts": [], "values": [], "metric": metric, "minutes": minutes}
+
+
+@app.get("/monitor/api/model-usage")
+async def monitor_model_usage(hours: int = 24):
+    """Per-model request and token summary from Postgres.
+
+    Returns [{model_id, requests, avg_tok_per_sec, total_tokens}, ...].
+    """
+    # TODO: implement — query ov_metrics.request_log GROUP BY model_id
+    return []
+
+
 if __name__ == "__main__":
     import uvicorn
     ctypes.CDLL("libc.so.6").prctl(15, b"ov_server", 0, 0, 0)  # PR_SET_NAME
+    _monitor_dist = Path(__file__).parent / "monitor" / "dist"
+    if _monitor_dist.exists():
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/monitor", StaticFiles(directory=str(_monitor_dist), html=True), name="monitor")
+        log.info(f"Monitor UI mounted at /monitor")
     if "--debug" in sys.argv:
         debug_logging = True
         log.info("Debug logging enabled (--debug flag)")
