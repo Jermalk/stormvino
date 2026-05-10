@@ -88,40 +88,10 @@ from server_config import (
     get_default_model, get_agent_model,
     _model_kv_gb, get_scheduler_config,
 )
+import model_manager
 
 # --- State ---
-loaded_models: Dict[str, ov_genai.LLMPipeline] = {}
-loaded_tokenizers: Dict[str, AutoTokenizer] = {}
-model_last_used: Dict[str, float] = {}
-emb_model = None
-emb_tokenizer = None
 _task_class_embeddings: "dict[str, np.ndarray] | None" = None  # None=not loaded, {}=failed
-_model_lock = asyncio.Lock()           # serialises model load/evict
-_infer_locks: Dict[str, asyncio.Lock] = {}  # one per model — prevents concurrent generate()
-_emb_lock = asyncio.Lock()
-
-loaded_vlm_models: Dict[str, ov_genai.VLMPipeline] = {}
-loaded_vlm_tokenizers: Dict[str, AutoTokenizer] = {}
-
-# VRAM tracking — total queried once at startup; per-model allocation maintained internally.
-# Using internal accounting because a fresh ov.Core() sees zero allocations from other instances.
-_TOTAL_VRAM_GB: Optional[float] = None
-_vram_allocated: Dict[str, float] = {}   # model_id → estimated GB on GPU
-_vlm_lock = asyncio.Lock()
-
-_vlm_infer_locks: Dict[str, asyncio.Lock] = {}
-
-
-def _infer_lock(model_id: str) -> asyncio.Lock:
-    if model_id not in _infer_locks:
-        _infer_locks[model_id] = asyncio.Lock()
-    return _infer_locks[model_id]
-
-
-def _vlm_infer_lock(model_id: str) -> asyncio.Lock:
-    if model_id not in _vlm_infer_locks:
-        _vlm_infer_locks[model_id] = asyncio.Lock()
-    return _vlm_infer_locks[model_id]
 
 
 # ---------------------------------------------------------------------------
@@ -144,9 +114,6 @@ _active_profile: str = _cfg.get("active_profile", "fast")
 _profile_switching: bool = False
 _profile_lock = asyncio.Lock()
 _last_routing_decision: dict | None = None
-_assessor_pipe: "ov_genai.LLMPipeline | None" = None
-_assessor_tokenizer: Optional[AutoTokenizer] = None
-_assessor_lock = asyncio.Lock()   # still used by pipe reuse in chat()
 _routing_prompt_cache: "dict[tuple[str, str], str]" = {}  # keyed (scope, profile_name)
 
 COMPLEXITY_SIGNALS: tuple[str, ...] = (
@@ -159,19 +126,6 @@ SIMPLE_Q_RE = re.compile(
     r"\b.{0,60}\??\s*$",
     re.IGNORECASE,
 )
-
-
-# ---------------------------------------------------------------------------
-# Memory guard
-# ---------------------------------------------------------------------------
-def check_memory():
-    ram = psutil.virtual_memory()
-    log.info(f"RAM: {ram.percent:.1f}% used, {ram.available/1024**3:.1f}GB available")
-    if ram.percent > MAX_RAM_PERCENT:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Insufficient memory: {ram.percent:.1f}% RAM used"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -265,322 +219,11 @@ def _record_stats(model_id: str, completion_tokens: int,
     stats.total_tokens    += completion_tokens
 
 
-# ---------------------------------------------------------------------------
-# Safe string extraction from openvino_genai generate() return value
-# pipe.generate() can return:
-#   - a plain str  (older builds)
-#   - DecodedResults with .texts: List[str]  (newer builds)
-#   - EncodedResults (should not happen when input is str, but guard anyway)
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Real token streamer using openvino_genai callback
-# FIX: capture the event loop at construction time — get_event_loop() called
-#      from a worker thread on 3.10+ often returns the wrong/closed loop.
-# ---------------------------------------------------------------------------
-class AsyncTokenStreamer(ov_genai.StreamerBase):
-    def __init__(self, tokenizer: ov_genai.Tokenizer, queue: asyncio.Queue, loop: asyncio.AbstractEventLoop):
-        super().__init__()
-        self._tokenizer = tokenizer
-        self._queue = queue
-        self._loop = loop          # captured from the async context, not the thread
-
-    def write(self, token) -> ov_genai.StreamingStatus:
-        ids = [token] if isinstance(token, int) else list(token)
-        text = self._tokenizer.decode(ids)
-        self._loop.call_soon_threadsafe(self._queue.put_nowait, text)
-        return ov_genai.StreamingStatus.RUNNING
-
-    def end(self):
-        self._loop.call_soon_threadsafe(self._queue.put_nowait, None)
 
 
 
-# ---------------------------------------------------------------------------
-# VRAM helpers
-# ---------------------------------------------------------------------------
-def model_size_gb(model_id: str) -> float:
-    """Disk size of model directory as a VRAM footprint estimate."""
-    path = AVAILABLE_MODELS.get(model_id) or AVAILABLE_VLM_MODELS.get(model_id)
-    if not path:
-        return 0.0
-    return sum(f.stat().st_size for f in Path(path).rglob("*") if f.is_file()) / 1024 ** 3
 
 
-def _init_vram() -> None:
-    """Query GPU total VRAM once at startup and store in _TOTAL_VRAM_GB."""
-    global _TOTAL_VRAM_GB
-    try:
-        import openvino as ov
-        core = ov.Core()
-        total = core.get_property(DEVICE, "GPU_DEVICE_TOTAL_MEM_SIZE")
-        _TOTAL_VRAM_GB = total / 1024 ** 3
-        log.info(f"{DEVICE} total VRAM: {_TOTAL_VRAM_GB:.2f} GB")
-    except Exception as exc:
-        log.warning(f"VRAM total query failed: {exc} — soft VRAM cap disabled")
-
-
-_init_vram()   # populate _TOTAL_VRAM_GB at import time (quick property query, no model load)
-
-
-def vram_free_gb() -> Optional[float]:
-    """Estimated free VRAM from internal allocation tracking (not a live GPU query).
-    A fresh ov.Core() always reports zero usage for allocations made by other instances,
-    so we maintain our own accounting instead."""
-    if _TOTAL_VRAM_GB is None:
-        return None
-    return _TOTAL_VRAM_GB - sum(_vram_allocated.values())
-
-
-def _evict_lru() -> str:
-    lru = min(loaded_models, key=lambda k: model_last_used.get(k, 0))
-    log.info(f"Evicting LRU model '{lru}' to free VRAM")
-    del loaded_models[lru]
-    del loaded_tokenizers[lru]
-    model_last_used.pop(lru, None)
-    _vram_allocated.pop(lru, None)
-    gc.collect()
-    return lru
-
-
-# ---------------------------------------------------------------------------
-# Model loader — async-safe, with lock
-# ---------------------------------------------------------------------------
-async def get_model(model_id: str) -> ov_genai.LLMPipeline:
-    if model_id in MODEL_ALIASES:
-        model_id = MODEL_ALIASES[model_id]
-    elif model_id not in AVAILABLE_MODELS:
-        log.warning(f"Unknown model '{model_id}', falling back to {get_default_model()}")
-        model_id = get_default_model()
-    async with _model_lock:
-        if model_id in loaded_models:
-            model_last_used[model_id] = time.time()
-            return loaded_models[model_id]
-
-        check_memory()
-
-        # Hard cap: evict LRU until under the model limit
-        while len(loaded_models) >= _cfg["max_loaded_models"]:
-            evicted = _evict_lru()
-            db.write_model_load_event(event_type="evict", model_id=evicted,
-                kv_cache_gb=None, vram_before_gb=None, vram_after_gb=vram_free_gb(),
-                elapsed_sec=None, meta={"reason": "hard_cap"})
-
-        # Soft cap: evict LRU until VRAM headroom is satisfied (re-query after each eviction).
-        # Include KV cache in size estimate — OpenVINO allocates weights + KV together.
-        kv_gb = _model_kv_gb(model_id)
-        size  = model_size_gb(model_id) + kv_gb
-        free  = vram_free_gb()
-        if free is not None:
-            while free - size < VRAM_HEADROOM_GB and loaded_models:
-                log.info(f"VRAM free={free:.1f}GB, model+KV={size:.1f}GB, headroom={VRAM_HEADROOM_GB}GB — evicting LRU")
-                evicted = _evict_lru()
-                db.write_model_load_event(event_type="evict", model_id=evicted,
-                    kv_cache_gb=None, vram_before_gb=free, vram_after_gb=vram_free_gb(),
-                    elapsed_sec=None, meta={"reason": "vram_headroom"})
-                free = vram_free_gb()
-        else:
-            log.debug("VRAM query unavailable — relying on model count limit only")
-
-        weights_gb = model_size_gb(model_id)
-        log.info(f"Loading {model_id} (~{weights_gb:.1f}GB)...")
-
-        async def _do_load() -> ov_genai.LLMPipeline:
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None,
-                partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
-                        scheduler_config=get_scheduler_config(kv_gb), **CONFIG)
-            )
-
-        try:
-            pipe = await _do_load()
-        except Exception as e:
-            err_str = str(e)
-            # OpenVINO KV-cache OOM: evict LRU and retry once.
-            if "size_in_bytes <= total_mem_size" in err_str:
-                if loaded_models:
-                    log.warning(f"VRAM OOM loading {model_id} — evicting LRU and retrying")
-                    _evict_lru()
-                    try:
-                        pipe = await _do_load()
-                    except Exception as e2:
-                        log.error(f"Failed to load {model_id} after eviction: {e2}")
-                        raise HTTPException(status_code=500, detail=str(e2))
-                else:
-                    # Nothing left to evict — retry with halved KV cache
-                    kv_reduced = max(1, kv_gb // 2)
-                    log.warning(
-                        f"VRAM OOM loading {model_id} (nothing to evict) — "
-                        f"retrying with kv_cache={kv_reduced}GB"
-                    )
-                    async def _do_load_reduced_kv() -> ov_genai.LLMPipeline:
-                        sched = ov_genai.SchedulerConfig()
-                        sched.cache_size = kv_reduced
-                        sched.enable_prefix_caching = _cfg.get("enable_prefix_caching", True)
-                        sched.max_num_batched_tokens = _cfg.get("max_num_batched_tokens", 4096)
-                        _loop = asyncio.get_running_loop()
-                        return await _loop.run_in_executor(
-                            None,
-                            partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
-                                    scheduler_config=sched, **CONFIG)
-                        )
-                    try:
-                        pipe = await _do_load_reduced_kv()
-                    except Exception as e2:
-                        log.error(f"Failed to load {model_id} with reduced KV ({kv_reduced}GB): {e2}")
-                        raise HTTPException(status_code=500, detail=str(e2))
-            elif "m_element_type.is_static()" in err_str:
-                # Stale OV compiled-model cache or prefix-caching incompatibility.
-                # Retry once with prefix caching disabled.
-                log.warning(
-                    f"OV prefix-cache error loading {model_id} — retrying without prefix caching"
-                )
-                async def _do_load_no_prefix() -> ov_genai.LLMPipeline:
-                    sched = ov_genai.SchedulerConfig()
-                    sched.cache_size = kv_gb
-                    sched.enable_prefix_caching = False
-                    sched.max_num_batched_tokens = _cfg.get("max_num_batched_tokens", 4096)
-                    _loop = asyncio.get_running_loop()
-                    return await _loop.run_in_executor(
-                        None,
-                        partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
-                                scheduler_config=sched, **CONFIG)
-                    )
-                try:
-                    pipe = await _do_load_no_prefix()
-                except Exception as e2:
-                    log.error(f"Failed to load {model_id} without prefix caching: {e2}")
-                    raise HTTPException(status_code=500, detail=str(e2))
-            else:
-                log.error(f"Failed to load {model_id}: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
-
-        try:
-            loop = asyncio.get_running_loop()
-            tokenizer = await loop.run_in_executor(
-                None,
-                partial(AutoTokenizer.from_pretrained, AVAILABLE_MODELS[model_id], fix_mistral_regex=True)
-            )
-        except Exception as e:
-            log.error(f"Failed to load tokenizer for {model_id}: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-
-        loaded_models[model_id] = pipe
-        loaded_tokenizers[model_id] = tokenizer
-        model_last_used[model_id] = time.time()
-        _vram_allocated[model_id] = weights_gb + kv_gb
-        free_after = vram_free_gb()
-        log.info(f"Loaded {model_id} | VRAM allocated: {_vram_allocated[model_id]:.1f}GB"
-                 + (f", free: {free_after:.1f}GB" if free_after is not None else ""))
-        _t_load_end = time.time()
-        db.write_model_load_event(
-            event_type="load", model_id=model_id,
-            kv_cache_gb=kv_gb, vram_before_gb=free,
-            vram_after_gb=free_after, elapsed_sec=None,
-            meta={"weights_gb": round(weights_gb, 2)},
-        )
-    return loaded_models[model_id]
-
-
-async def get_embedding_model():
-    global emb_model, emb_tokenizer
-    async with _emb_lock:
-        if emb_model is None:
-            check_memory()
-            log.info("Loading embedding model...")
-            loop = asyncio.get_running_loop()
-            emb_device = _cfg.get("embedding_device", DEVICE)
-            log.info(f"Loading embedding model on {emb_device}")
-            emb_model = await loop.run_in_executor(
-                None,
-                partial(OVModelForFeatureExtraction.from_pretrained,
-                        EMBEDDING_MODEL_PATH, device=emb_device)
-            )
-            emb_tokenizer = await loop.run_in_executor(
-                None,
-                partial(AutoTokenizer.from_pretrained, EMBEDDING_MODEL_PATH, fix_mistral_regex=True)
-            )
-            log.info("Embedding model loaded")
-    return emb_model, emb_tokenizer
-
-
-async def get_vlm(model_id: str) -> Tuple[ov_genai.VLMPipeline, AutoTokenizer]:
-    if model_id in MODEL_ALIASES:
-        model_id = MODEL_ALIASES[model_id]
-    if not model_id or model_id not in AVAILABLE_VLM_MODELS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"VLM '{model_id}' not available. Known VLMs: {list(AVAILABLE_VLM_MODELS)}"
-        )
-    async with _vlm_lock:
-        if model_id in loaded_vlm_models:
-            model_last_used[model_id] = time.time()
-            return loaded_vlm_models[model_id], loaded_vlm_tokenizers[model_id]
-
-        check_memory()
-
-        # Keep at most one VLM in memory
-        if loaded_vlm_models:
-            lru = min(loaded_vlm_models, key=lambda k: model_last_used.get(k, 0))
-            log.info(f"Evicting VLM '{lru}'")
-            del loaded_vlm_models[lru]
-            del loaded_vlm_tokenizers[lru]
-            model_last_used.pop(lru, None)
-            _vram_allocated.pop(lru, None)
-            gc.collect()
-
-        # Evict LLMs until VRAM headroom is satisfied (re-query after each eviction)
-        size = model_size_gb(model_id)
-        free = vram_free_gb()
-        if free is not None:
-            while free - size < VRAM_HEADROOM_GB and loaded_models:
-                log.info(f"VRAM free={free:.1f}GB, VLM={size:.1f}GB — evicting LRU LLM")
-                _evict_lru()
-                free = vram_free_gb()
-
-        vlm_device = _cfg.get("vision_device", DEVICE)
-        log.info(f"Loading VLM {model_id} (~{size:.1f}GB) on {vlm_device}...")
-        try:
-            loop = asyncio.get_running_loop()
-            pipe = await loop.run_in_executor(
-                None,
-                partial(ov_genai.VLMPipeline, AVAILABLE_VLM_MODELS[model_id], vlm_device, **CONFIG)
-            )
-            tokenizer = await loop.run_in_executor(
-                None,
-                partial(AutoTokenizer.from_pretrained, AVAILABLE_VLM_MODELS[model_id])
-            )
-            loaded_vlm_models[model_id] = pipe
-            loaded_vlm_tokenizers[model_id] = tokenizer
-            model_last_used[model_id] = time.time()
-            _vram_allocated[model_id] = model_size_gb(model_id)
-            free_after = vram_free_gb()
-            log.info(f"Loaded VLM {model_id} | VRAM allocated: {_vram_allocated[model_id]:.1f}GB"
-                     + (f", free: {free_after:.1f}GB" if free_after is not None else ""))
-        except Exception as exc:
-            log.error(f"Failed to load VLM {model_id}: {exc}")
-            raise HTTPException(status_code=500, detail=str(exc))
-
-    return loaded_vlm_models[model_id], loaded_vlm_tokenizers[model_id]
-
-
-async def _warm_model(model_id: str) -> None:
-    """Fire-and-forget preload helper — exceptions are logged, never raised."""
-    try:
-        await get_model(model_id)
-        log.info(f"Preload complete: {model_id}")
-    except Exception as exc:
-        log.warning(f"Preload failed for {model_id}: {exc}")
-
-
-async def _warm_vlm(model_id: str) -> None:
-    """Fire-and-forget VLM preload helper — exceptions are logged, never raised."""
-    try:
-        await get_vlm(model_id)
-        log.info(f"VLM preload complete: {model_id}")
-    except Exception as exc:
-        log.warning(f"VLM preload failed for {model_id}: {exc}")
 
 
 async def _apply_profile(name: str) -> None:
@@ -606,22 +249,12 @@ async def _apply_profile(name: str) -> None:
             kv_changed = new_kv != _cfg.get("kv_cache_size_gb")
 
             # VLMs are always evicted — loaded on-demand, not profile-specific
-            async with _vlm_lock:
-                for mid in list(loaded_vlm_models):
-                    del loaded_vlm_models[mid]
-                    del loaded_vlm_tokenizers[mid]
-                    model_last_used.pop(mid, None)
-                    _vram_allocated.pop(mid, None)
+            await model_manager.evict_all_vlms()
 
             # LLMs: evict only when KV budget changes — it is baked into LLMPipeline
             # at construction time and cannot be changed on a live pipeline.
             if kv_changed:
-                async with _model_lock:
-                    for mid in list(loaded_models):
-                        del loaded_models[mid]
-                        del loaded_tokenizers[mid]
-                        model_last_used.pop(mid, None)
-                        _vram_allocated.pop(mid, None)
+                await model_manager.evict_all_models()
                 log.info(f"KV budget {_cfg['kv_cache_size_gb']}→{new_kv} GB — all LLMs evicted")
 
             gc.collect()
@@ -638,9 +271,7 @@ async def _apply_profile(name: str) -> None:
 
             # Trim to new model-count limit via LRU if we kept existing models
             if not kv_changed:
-                async with _model_lock:
-                    while len(loaded_models) > _cfg["max_loaded_models"]:
-                        _evict_lru()
+                await model_manager.trim_to_limit()
 
             routing_default = prof.get("routing_default", "local")
             _cfg.setdefault("routing", {})["default"] = routing_default
@@ -652,7 +283,7 @@ async def _apply_profile(name: str) -> None:
                 + ("" if kv_changed else " (LLMs retained)")
             )
             if get_agent_model():
-                asyncio.create_task(_warm_model(get_agent_model()))
+                asyncio.create_task(model_manager._warm_model(get_agent_model()))
         except Exception as exc:
             log.error(f"Profile switch to '{name}' failed: {exc}")
         finally:
@@ -698,7 +329,7 @@ def _local_catalogue() -> list[dict]:
             "tier":           tier_map.get(mid, "fast"),
             "context_length": None,
             "pricing":        None,
-            "loaded":         mid in loaded_models,
+            "loaded":         mid in model_manager.loaded_models,
         })
     for mid in AVAILABLE_VLM_MODELS:
         entries.append({
@@ -708,7 +339,7 @@ def _local_catalogue() -> list[dict]:
             "tier":           tier_map.get(mid, "fast"),
             "context_length": None,
             "pricing":        None,
-            "loaded":         mid in loaded_vlm_models,
+            "loaded":         mid in model_manager.loaded_vlm_models,
         })
     return entries
 
@@ -876,7 +507,7 @@ async def _load_embedding_centroids() -> None:
     """Blocking startup step: load embedding model and compute task class centroids."""
     global _task_class_embeddings
     try:
-        model, tok = await get_embedding_model()
+        model, tok = await model_manager.get_embedding_model()
         loop = asyncio.get_running_loop()
         centroids = await loop.run_in_executor(None, _compute_task_class_centroids, model, tok)
         _task_class_embeddings = centroids
@@ -893,80 +524,6 @@ async def _load_embedding_centroids() -> None:
         _task_class_embeddings = {}
 
 
-async def _load_assessor() -> None:
-    """Load the assessor LLMPipeline as a background task after centroid computation.
-
-    Not added to loaded_models — excluded from LRU eviction and MAX_LOADED_MODELS cap.
-    VRAM tracked under '_assessor' key in _vram_allocated so vram_free_gb() stays accurate.
-    """
-    global _assessor_pipe
-    assessor_cfg = _cfg.get("assessor", {})
-    model_id = assessor_cfg.get("model", "")
-    if not model_id:
-        log.info("[assessor] no assessor.model configured — skipped")
-        return
-    if model_id not in AVAILABLE_MODELS:
-        log.warning(f"[assessor] model '{model_id}' not on disk — skipped")
-        return
-
-    kv_gb = assessor_cfg.get("kv_cache_size_gb", 2)
-    sched = ov_genai.SchedulerConfig()
-    sched.cache_size = kv_gb
-    sched.enable_prefix_caching = _cfg.get("enable_prefix_caching", True)
-    sched.max_num_batched_tokens = _cfg.get("max_num_batched_tokens", 4096)
-
-    weights_gb = model_size_gb(model_id)
-    log.info(f"[assessor] loading '{model_id}' (~{weights_gb:.1f}GB weights + {kv_gb}GB KV)...")
-    start = time.time()
-    loop = asyncio.get_running_loop()
-    try:
-        pipe = await loop.run_in_executor(
-            None,
-            partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
-                    scheduler_config=sched, **CONFIG)
-        )
-    except Exception as exc:
-        if "m_element_type.is_static()" in str(exc):
-            # Stale compiled blob in main cache — retry with a dedicated assessor cache dir
-            # so OV compiles fresh and stores the new blob there (not in the shared cache).
-            log.warning(f"[assessor] stale blob — retrying with dedicated assessor cache")
-            assessor_cache = str(Path(CONFIG["CACHE_DIR"]).parent / (Path(CONFIG["CACHE_DIR"]).name + "_assessor"))
-            retry_config = {**CONFIG, "CACHE_DIR": assessor_cache}
-            try:
-                pipe = await loop.run_in_executor(
-                    None,
-                    partial(ov_genai.LLMPipeline, AVAILABLE_MODELS[model_id], DEVICE,
-                            scheduler_config=sched, **retry_config)
-                )
-            except Exception as exc2:
-                log.error(f"[assessor] failed to load '{model_id}' even with fresh cache: {exc2}")
-                return
-        else:
-            log.error(f"[assessor] failed to load '{model_id}': {exc}")
-            return
-
-    elapsed = time.time() - start
-    _assessor_pipe = pipe
-    _vram_allocated["_assessor"] = weights_gb + kv_gb
-    log.info(
-        f"[fast-model] loaded '{model_id}' in {elapsed:.1f}s"
-        f" | VRAM ~{_vram_allocated['_assessor']:.1f}GB (always-warm for pipe reuse)"
-    )
-
-    # Load tokenizer so pipe can be reused for task execution when routing selects this model
-    global _assessor_tokenizer
-    try:
-        loop = asyncio.get_running_loop()
-        _assessor_tokenizer = await loop.run_in_executor(
-            None,
-            partial(AutoTokenizer.from_pretrained, AVAILABLE_MODELS[model_id], fix_mistral_regex=True)
-        )
-        log.info(f"[assessor] tokenizer ready for '{model_id}'")
-    except Exception as exc:
-        log.warning(f"[assessor] tokenizer load failed ({exc}) — pipe reuse disabled")
-
-
-
 
 def _route_by_embedding(query: str) -> "tuple[str, float, list[float] | None]":
     """Return (task_class, cosine_similarity, embedding_vector) for the best-matching task class.
@@ -974,11 +531,11 @@ def _route_by_embedding(query: str) -> "tuple[str, float, list[float] | None]":
     if not _task_class_embeddings:
         return ("general", 0.0, None)
 
-    inputs = emb_tokenizer(
+    inputs = model_manager.emb_tokenizer(
         [query[:2048]],  # ~512-token char budget
         return_tensors="pt", padding=True, truncation=True, max_length=512,
     )
-    outputs = emb_model(**inputs)
+    outputs = model_manager.emb_model(**inputs)
     vec = outputs.last_hidden_state.mean(dim=1).detach().numpy()[0]
     norm = np.linalg.norm(vec)
     vec = vec / max(norm, 1e-9)
@@ -1113,14 +670,14 @@ async def _startup_preload() -> None:
     await db.init_pool(_cfg.get("postgres_dsn"))
     await db.prune_old_events(days=30)
     await _load_embedding_centroids()           # blocking — centroids before assessor
-    asyncio.create_task(_load_assessor())       # background — assessor pipeline
+    asyncio.create_task(model_manager._load_assessor())       # background — assessor pipeline
     asyncio.create_task(_system_snapshot_loop())
     if get_agent_model():
         log.info(f"Scheduling startup preload of agent model '{get_agent_model()}'")
-        asyncio.create_task(_warm_model(get_agent_model()))
+        asyncio.create_task(model_manager._warm_model(get_agent_model()))
     if VISION_MODEL:
         log.info(f"Scheduling startup preload of VLM '{VISION_MODEL}'")
-        asyncio.create_task(_warm_vlm(VISION_MODEL))
+        asyncio.create_task(model_manager._warm_vlm(VISION_MODEL))
 
 
 @app.on_event("shutdown")
@@ -1134,12 +691,12 @@ async def _system_snapshot_loop() -> None:
         await asyncio.sleep(60)
         try:
             ram = psutil.virtual_memory()
-            free = vram_free_gb()
+            free = model_manager.vram_free_gb()
             db.write_system_snapshot(
-                vram_used_gb=round(_TOTAL_VRAM_GB - free, 2) if (_TOTAL_VRAM_GB and free) else None,
-                vram_total_gb=round(_TOTAL_VRAM_GB, 2) if _TOTAL_VRAM_GB else None,
+                vram_used_gb=round(model_manager._TOTAL_VRAM_GB - free, 2) if (model_manager._TOTAL_VRAM_GB and free) else None,
+                vram_total_gb=round(model_manager._TOTAL_VRAM_GB, 2) if model_manager._TOTAL_VRAM_GB else None,
                 ram_used_pct=ram.percent,
-                loaded_models=list(loaded_models.keys()),
+                loaded_models=list(model_manager.loaded_models.keys()),
                 active_requests=stats.active_requests,
                 meta={},
             )
@@ -1172,13 +729,13 @@ async def health():
         "total_tokens":     stats.total_tokens,
         "ram_used_pct":     ram.percent,
         "ram_available_gb": round(ram.available / 1024**3, 1),
-        "loaded_models":     list(loaded_models.keys()),
-        "loaded_vlm_models": list(loaded_vlm_models.keys()),
-        "embedding_loaded":  emb_model is not None,
-        "assessor_loaded":   _assessor_pipe is not None,
-        "vram_total_gb":     round(_TOTAL_VRAM_GB, 2) if _TOTAL_VRAM_GB else None,
-        "vram_allocated_gb": {k: round(v, 2) for k, v in _vram_allocated.items()},
-        "vram_free_gb":      round(vram_free_gb(), 2) if vram_free_gb() is not None else None,
+        "loaded_models":     list(model_manager.loaded_models.keys()),
+        "loaded_vlm_models": list(model_manager.loaded_vlm_models.keys()),
+        "embedding_loaded":  model_manager.emb_model is not None,
+        "assessor_loaded":   model_manager._assessor_pipe is not None,
+        "vram_total_gb":     round(model_manager._TOTAL_VRAM_GB, 2) if model_manager._TOTAL_VRAM_GB else None,
+        "vram_allocated_gb": {k: round(v, 2) for k, v in model_manager._vram_allocated.items()},
+        "vram_free_gb":      round(model_manager.vram_free_gb(), 2) if model_manager.vram_free_gb() is not None else None,
         "kv_cache_size_gb":          _cfg.get("kv_cache_size_gb", 8),
         "assessor_kv_cache_size_gb": _cfg.get("assessor", {}).get("kv_cache_size_gb", 2),
         "active_profile":        _active_profile,
@@ -1245,7 +802,7 @@ async def _chat_vlm(req: ChatRequest):
     if not VISION_MODEL:
         raise HTTPException(status_code=400, detail="Image content received but no vision_model configured")
 
-    pipe, tokenizer = await get_vlm(VISION_MODEL)
+    pipe, tokenizer = await model_manager.get_vlm(VISION_MODEL)
     model_id = VISION_MODEL
 
     messages = _limit_image_history(req.messages)
@@ -1269,9 +826,9 @@ async def _chat_vlm(req: ChatRequest):
         queue: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
         ov_tokenizer = pipe.get_tokenizer()
-        streamer = AsyncTokenStreamer(ov_tokenizer, queue, loop)
+        streamer = model_manager.AsyncTokenStreamer(ov_tokenizer, queue, loop)
 
-        lock = _vlm_infer_lock(model_id)
+        lock = model_manager._vlm_infer_lock(model_id)
         await lock.acquire()
 
         async def run_vlm_generation():
@@ -1336,7 +893,7 @@ async def _chat_vlm(req: ChatRequest):
     try:
         start = time.time()
         loop = asyncio.get_running_loop()
-        async with _vlm_infer_lock(model_id):
+        async with model_manager._vlm_infer_lock(model_id):
             def _gen():
                 return pipe.generate(prompt, images=images, generation_config=gen_config)
             raw = await loop.run_in_executor(None, _gen)
@@ -1534,17 +1091,17 @@ async def chat(req: ChatRequest):
     )
 
     _assessor_model_id = _cfg.get("assessor", {}).get("model", "")
-    if (_assessor_pipe is not None
-            and _assessor_tokenizer is not None
+    if (model_manager._assessor_pipe is not None
+            and model_manager._assessor_tokenizer is not None
             and model_id == _assessor_model_id):
         # Reuse the already-loaded assessor pipeline — no extra VRAM cost
-        pipe = _assessor_pipe
-        tokenizer = _assessor_tokenizer
+        pipe = model_manager._assessor_pipe
+        tokenizer = model_manager._assessor_tokenizer
         log.debug(f"[router] reusing assessor pipe for task model '{model_id}'")
     else:
-        pipe = await get_model(model_id)
-        model_id = next(k for k in loaded_models if loaded_models[k] is pipe)
-        tokenizer = loaded_tokenizers[model_id]
+        pipe = await model_manager.get_model(model_id)
+        model_id = next(k for k in model_manager.loaded_models if model_manager.loaded_models[k] is pipe)
+        tokenizer = model_manager.loaded_tokenizers[model_id]
 
     prompt = build_prompt(req.messages, tokenizer, tools=req.tools, thinking=effective_thinking)
     if debug_logging:
@@ -1573,7 +1130,7 @@ async def chat(req: ChatRequest):
             yield ": keepalive\n\n"  # byte before lock wait resets client TTFT timeout
 
             try:
-                async with _infer_lock(model_id):
+                async with model_manager._infer_lock(model_id):
                     gen_task = asyncio.ensure_future(
                         loop.run_in_executor(None, partial(pipe.generate, prompt, gen_config))
                     )
@@ -1625,7 +1182,7 @@ async def chat(req: ChatRequest):
                     # AnythingLLM executes the tool — web search takes 5-10s,
                     # giving the 14b load a head start before it is needed.
                     if get_default_model() and get_default_model() != model_id:
-                        asyncio.create_task(_warm_model(get_default_model()))
+                        asyncio.create_task(model_manager._warm_model(get_default_model()))
                     delta = {"tool_calls": tool_calls}
                 else:
                     delta = {"content": answer} if answer else {}
@@ -1668,12 +1225,12 @@ async def chat(req: ChatRequest):
         queue: asyncio.Queue = asyncio.Queue()
         loop = asyncio.get_running_loop()
         ov_tokenizer = pipe.get_tokenizer()
-        streamer = AsyncTokenStreamer(ov_tokenizer, queue, loop)
+        streamer = model_manager.AsyncTokenStreamer(ov_tokenizer, queue, loop)
 
         # Acquire per-model inference lock before starting — held until
         # generation completes so concurrent requests on the same pipeline
         # are serialised. Different models run concurrently without waiting.
-        lock = _infer_lock(model_id)
+        lock = model_manager._infer_lock(model_id)
         await lock.acquire()
 
         async def run_generation():
@@ -1786,7 +1343,7 @@ async def chat(req: ChatRequest):
     try:
         start = time.time()
         loop = asyncio.get_running_loop()
-        async with _infer_lock(model_id):
+        async with model_manager._infer_lock(model_id):
             raw = await loop.run_in_executor(None, partial(pipe.generate, prompt, gen_config))
         elapsed = time.time() - start
 
@@ -1800,7 +1357,7 @@ async def chat(req: ChatRequest):
         completion_tokens = len(tokenizer.encode(answer or ""))
         if tool_calls:
             if get_default_model() and get_default_model() != model_id:
-                asyncio.create_task(_warm_model(get_default_model()))
+                asyncio.create_task(model_manager._warm_model(get_default_model()))
             message = {"role": "assistant", "content": None, "tool_calls": tool_calls}
             finish_reason = "tool_calls"
         else:
@@ -1843,7 +1400,7 @@ async def chat(req: ChatRequest):
 
 @app.post("/v1/embeddings")
 async def embeddings(req: EmbeddingRequest):
-    model, tok = await get_embedding_model()
+    model, tok = await model_manager.get_embedding_model()
     texts = [req.input] if isinstance(req.input, str) else req.input
 
     loop = asyncio.get_running_loop()
