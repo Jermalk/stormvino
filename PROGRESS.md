@@ -265,11 +265,21 @@
 
 ---
 
-## NOW
-
-**Working on:** Module split — Step 3 complete (has_images added to prompt_builder.py)
-**Last commit:** refactor: Step 3 — add has_images() to prompt_builder.py
-**Next action:** Step 4 — extract catalogue.py (plans/20260510_PLAN_split.md)
+### 2026-05-10 — Session 27 (a11b2d5)
+**Working on:** Module split — Steps 4–6 complete (catalogue.py, router.py, final tidy)
+**Last commit:** a11b2d5 — refactor: Step 6 — final tidy (alias removal, CLAUDE.md update)
+**Next action:** n8n AI Agent node validation (tool call loop); or VRAM bar overcount fix in ov_monitor; or STT Phase 1
 **Blocked on:** nothing
 **Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor.
-**Tests:** pass — /health OK after restart
+**Tests:** pass — /health OK, routing works (embedding strategy, confidence=0.90)
+
+---
+
+## NOW
+
+**Working on:** Module split — all 6 steps complete
+**Last commit:** a11b2d5 — refactor: Step 6 — final tidy (alias removal, CLAUDE.md update)
+**Next action:** n8n AI Agent node validation (tool call loop); or VRAM bar overcount fix in ov_monitor; or STT Phase 1
+**Blocked on:** nothing
+**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor.
+**Tests:** pass — /health OK, routing, streaming, non-streaming all verified
