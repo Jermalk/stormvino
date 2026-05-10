@@ -267,9 +267,9 @@
 
 ## NOW
 
-**Working on:** Module split — Step 0 complete (mutable globals consolidated into _cfg)
-**Last commit:** refactor: Step 0 — replace MAX_LOADED_MODELS/DEFAULT_MODEL/AGENT_MODEL with _cfg reads
-**Next action:** Step 1 — extract server_config.py (plans/20260510_PLAN_split.md)
+**Working on:** Module split — Step 1 complete (server_config.py extracted)
+**Last commit:** refactor: Step 1 — extract server_config.py
+**Next action:** Step 2 — extract model_manager.py (plans/20260510_PLAN_split.md)
 **Blocked on:** nothing
 **Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor.
-**Tests:** pass — /health OK, streaming chat OK
+**Tests:** pass — /health OK, streaming chat OK, /v1/models OK
