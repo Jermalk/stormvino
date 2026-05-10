@@ -264,7 +264,6 @@ def get_scheduler_config(kv_override: int | None = None) -> ov_genai.SchedulerCo
 MAX_RAM_PERCENT    = _cfg["max_ram_percent"]
 MAX_NEW_TOKENS_DEFAULT = _cfg["max_new_tokens_default"]
 MAX_NEW_TOKENS_AGENT   = _cfg["max_new_tokens_agent"]
-MAX_LOADED_MODELS  = _cfg["max_loaded_models"]
 VRAM_HEADROOM_GB   = _cfg["vram_headroom_gb"]
 MODEL_ALIASES: Dict[str, str] = _cfg["model_aliases"]
 VLM_MAX_IMAGE_TURNS:   int = int(_cfg["vlm_max_image_turns"])
@@ -292,9 +291,17 @@ def _pick(key: str, fallback_index: int) -> str:
         return picked
     return ""
 
-DEFAULT_MODEL = _pick("default_model", -1)   # last (usually largest)
-AGENT_MODEL   = _pick("agent_model",    0)   # first (usually smallest)
+_cfg["_resolved_default_model"] = _pick("default_model", -1)
+_cfg["_resolved_agent_model"]   = _pick("agent_model",    0)
 ROUTING_TRIGGER_MODELS: frozenset[str] = frozenset({"auto", "Auto", ""})
+
+
+def get_default_model() -> str:
+    return _cfg.get("_resolved_default_model", "")
+
+
+def get_agent_model() -> str:
+    return _cfg.get("_resolved_agent_model", "")
 
 # Embedding model — not auto-discovered (loaded via different code path)
 _emb_name          = _cfg.get("embedding_model", "")
@@ -562,8 +569,8 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
     if model_id in MODEL_ALIASES:
         model_id = MODEL_ALIASES[model_id]
     elif model_id not in AVAILABLE_MODELS:
-        log.warning(f"Unknown model '{model_id}', falling back to {DEFAULT_MODEL}")
-        model_id = DEFAULT_MODEL
+        log.warning(f"Unknown model '{model_id}', falling back to {get_default_model()}")
+        model_id = get_default_model()
     async with _model_lock:
         if model_id in loaded_models:
             model_last_used[model_id] = time.time()
@@ -572,7 +579,7 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
         check_memory()
 
         # Hard cap: evict LRU until under the model limit
-        while len(loaded_models) >= MAX_LOADED_MODELS:
+        while len(loaded_models) >= _cfg["max_loaded_models"]:
             evicted = _evict_lru()
             db.write_model_load_event(event_type="evict", model_id=evicted,
                 kv_cache_gb=None, vram_before_gb=None, vram_after_gb=vram_free_gb(),
@@ -797,7 +804,7 @@ async def _warm_vlm(model_id: str) -> None:
 
 async def _apply_profile(name: str) -> None:
     """Evict all LLMs, apply profile settings, then preload the agent model."""
-    global _active_profile, _profile_switching, DEFAULT_MODEL, AGENT_MODEL, MAX_LOADED_MODELS
+    global _active_profile, _profile_switching
     profiles = _cfg.get("profiles", {})
     prof = profiles.get(name)
     if not prof:
@@ -841,18 +848,17 @@ async def _apply_profile(name: str) -> None:
             # Apply new settings to live config
             _cfg["kv_cache_size_gb"]  = new_kv
             _cfg["max_loaded_models"] = prof.get("max_loaded_models", _cfg["max_loaded_models"])
-            MAX_LOADED_MODELS = _cfg["max_loaded_models"]
             new_default = prof.get("default_model", "")
             new_agent   = prof.get("agent_model", "")
             if new_default and new_default in AVAILABLE_MODELS:
-                DEFAULT_MODEL = new_default
+                _cfg["_resolved_default_model"] = new_default
             if new_agent and new_agent in AVAILABLE_MODELS:
-                AGENT_MODEL = new_agent
+                _cfg["_resolved_agent_model"] = new_agent
 
             # Trim to new model-count limit via LRU if we kept existing models
             if not kv_changed:
                 async with _model_lock:
-                    while len(loaded_models) > MAX_LOADED_MODELS:
+                    while len(loaded_models) > _cfg["max_loaded_models"]:
                         _evict_lru()
 
             routing_default = prof.get("routing_default", "local")
@@ -861,11 +867,11 @@ async def _apply_profile(name: str) -> None:
             _active_profile = name
             log.info(
                 f"Profile '{name}' active — kv={_cfg['kv_cache_size_gb']}GB "
-                f"max_models={MAX_LOADED_MODELS} routing={routing_default}"
+                f"max_models={_cfg['max_loaded_models']} routing={routing_default}"
                 + ("" if kv_changed else " (LLMs retained)")
             )
-            if AGENT_MODEL:
-                asyncio.create_task(_warm_model(AGENT_MODEL))
+            if get_agent_model():
+                asyncio.create_task(_warm_model(get_agent_model()))
         except Exception as exc:
             log.error(f"Profile switch to '{name}' failed: {exc}")
         finally:
@@ -1257,7 +1263,7 @@ def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
         available.append(m)
 
     if not available:
-        fallback_id = AGENT_MODEL or next(iter(AVAILABLE_MODELS), "")
+        fallback_id = get_agent_model() or next(iter(AVAILABLE_MODELS), "")
         log.error(f"[router] no available models for task_class='{task_class}' scope='{scope}' — fallback '{fallback_id}'")
         return {"id": fallback_id, "provider": "loc"}
 
@@ -1284,7 +1290,7 @@ def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
         chosen = _best()
 
     if chosen is None:
-        fallback_id = AGENT_MODEL or next(iter(AVAILABLE_MODELS), "")
+        fallback_id = get_agent_model() or next(iter(AVAILABLE_MODELS), "")
         log.error(f"[router] model selection failed for task_class='{task_class}' — fallback '{fallback_id}'")
         return {"id": fallback_id, "provider": "loc"}
 
@@ -1328,9 +1334,9 @@ async def _startup_preload() -> None:
     await _load_embedding_centroids()           # blocking — centroids before assessor
     asyncio.create_task(_load_assessor())       # background — assessor pipeline
     asyncio.create_task(_system_snapshot_loop())
-    if AGENT_MODEL:
-        log.info(f"Scheduling startup preload of agent model '{AGENT_MODEL}'")
-        asyncio.create_task(_warm_model(AGENT_MODEL))
+    if get_agent_model():
+        log.info(f"Scheduling startup preload of agent model '{get_agent_model()}'")
+        asyncio.create_task(_warm_model(get_agent_model()))
     if VISION_MODEL:
         log.info(f"Scheduling startup preload of VLM '{VISION_MODEL}'")
         asyncio.create_task(_warm_vlm(VISION_MODEL))
@@ -1727,7 +1733,7 @@ async def chat(req: ChatRequest):
                 _last_routing_decision = routing_decision
                 return await _proxy_chat(req, spec)
             log.warning(f"[router] no backend for OVH model '{model_id}' — local fallback")
-            model_id = AGENT_MODEL or next(iter(AVAILABLE_MODELS), "")
+            model_id = get_agent_model() or next(iter(AVAILABLE_MODELS), "")
             routing_decision["model"] = model_id
             routing_decision["strategy"] += "+local_fallback"
 
@@ -1837,8 +1843,8 @@ async def chat(req: ChatRequest):
                     # Speculatively start loading the summarisation model while
                     # AnythingLLM executes the tool — web search takes 5-10s,
                     # giving the 14b load a head start before it is needed.
-                    if DEFAULT_MODEL and DEFAULT_MODEL != model_id:
-                        asyncio.create_task(_warm_model(DEFAULT_MODEL))
+                    if get_default_model() and get_default_model() != model_id:
+                        asyncio.create_task(_warm_model(get_default_model()))
                     delta = {"tool_calls": tool_calls}
                 else:
                     delta = {"content": answer} if answer else {}
@@ -2012,8 +2018,8 @@ async def chat(req: ChatRequest):
 
         completion_tokens = len(tokenizer.encode(answer or ""))
         if tool_calls:
-            if DEFAULT_MODEL and DEFAULT_MODEL != model_id:
-                asyncio.create_task(_warm_model(DEFAULT_MODEL))
+            if get_default_model() and get_default_model() != model_id:
+                asyncio.create_task(_warm_model(get_default_model()))
             message = {"role": "assistant", "content": None, "tool_calls": tool_calls}
             finish_reason = "tool_calls"
         else:
