@@ -224,22 +224,28 @@ def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
     if pref == "balanced" and complexity > 0.65:
         pref = "best"
 
-    def _fastest() -> dict | None:
-        return next((m for m in available if m.get("tier") == "fast" and m.get("provider") == "loc"), None)
+    def _fastest_from(pool: list[dict]) -> dict | None:
+        return next((m for m in pool if m.get("tier") == "fast" and m.get("provider") == "loc"), None)
 
-    def _balanced() -> dict | None:
-        loc = [m for m in available if m.get("provider") == "loc"]
+    def _balanced_from(pool: list[dict]) -> dict | None:
+        loc = [m for m in pool if m.get("provider") == "loc"]
         return loc[-1] if loc else None
 
-    def _best() -> dict | None:
-        return available[-1] if available else None
+    def _best_from(pool: list[dict]) -> dict | None:
+        return pool[-1] if pool else None
 
-    if pref == "fastest":
-        chosen = _fastest() or _balanced() or _best()
-    elif pref == "balanced":
-        chosen = _balanced() or _best()
-    else:
-        chosen = _best()
+    def _pick(pool: list[dict]) -> dict | None:
+        if pref == "fastest":
+            return _fastest_from(pool) or _balanced_from(pool) or _best_from(pool)
+        elif pref == "balanced":
+            return _balanced_from(pool) or _best_from(pool)
+        else:
+            return _best_from(pool)
+
+    # Prefer models already in VRAM — avoid the eviction+load cost (minutes for
+    # large models). Only fall back to the full available list when none are loaded.
+    loaded_avail = [m for m in available if m["id"] in model_manager.loaded_models]
+    chosen = _pick(loaded_avail) or _pick(available)
 
     if chosen is None:
         fallback_id = get_agent_model() or next(iter(AVAILABLE_MODELS), "")

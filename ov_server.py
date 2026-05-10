@@ -677,7 +677,7 @@ async def chat(req: ChatRequest):
 
     # Explicit OVH model: client named a model from the OVH catalogue directly.
     # Proxy it immediately — do not run task-class routing.
-    if req.model not in ROUTING_TRIGGER_MODELS and req.model not in AVAILABLE_MODELS:
+    if req.model not in ROUTING_TRIGGER_MODELS and req.model not in AVAILABLE_MODELS and req.model not in AVAILABLE_VLM_MODELS:
         _ovh_entries, _ = catalogue._catalogue_cache.get("ovh", ([], 0.0))
         if any(e["id"] == req.model for e in _ovh_entries):
             backends = _cfg.get("routing", {}).get("backends", {})
@@ -694,8 +694,12 @@ async def chat(req: ChatRequest):
                 return await _proxy_chat(req, spec)
         log.warning(f"[router] unknown model '{req.model}' not local or OVH — routing as auto")
 
+    # Explicit local VLM model — redirect to VLM path (handles text-only too)
+    if req.model not in ROUTING_TRIGGER_MODELS and req.model in AVAILABLE_VLM_MODELS:
+        return await _chat_vlm(req)
+
     if req.model not in ROUTING_TRIGGER_MODELS and req.model in AVAILABLE_MODELS:
-        # Explicit local model — bypass routing
+        # Explicit local LLM — bypass routing
         model_id = req.model
         routing_decision: dict = {"strategy": "explicit", "task_class": None, "model": model_id}
     else:
@@ -993,10 +997,13 @@ async def chat(req: ChatRequest):
                             }
                             yield f"data: {json.dumps(chunk)}\n\n"
             finally:
+                # Use wait_for so a disconnected client doesn't hold the lock forever.
+                # asyncio.shield keeps gen_task alive after timeout (executor thread
+                # can't be cancelled; it finishes naturally after max_new_tokens).
                 try:
-                    await gen_task
-                except Exception as exc:
-                    log.error(f"Generation error in token_generator: {exc}")
+                    await asyncio.wait_for(asyncio.shield(gen_task), timeout=300.0)
+                except (asyncio.TimeoutError, Exception) as exc:
+                    log.warning(f"token_generator finally: gen_task ended ({type(exc).__name__}): {exc}")
                 lock.release()
                 stats.active_requests -= 1
                 elapsed = time.time() - start
