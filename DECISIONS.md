@@ -12,6 +12,18 @@
 **Rejected alternative:** Adopt all standards as-is — risks false safety from wrong Python version features and dangerous mock coverage.
 **Affects:** coding_standards_python.json, CLAUDE.md
 
+### 2026-05-11 — FP16 SDXL over INT8 for image generation
+**Decision:** Use sdxl-fp16-ov (7.0 GB FP16) instead of sdxl-int8-ov (3.5 GB INT8).
+**Rationale:** INT8 SDXL produced visually unusable output (extreme quantization artefacts). FP16 fits comfortably on GPU.1 (24 GB) alongside the LLM and VLM. VRAM eviction guard added in evict_to_fit() ensures LLMs are evicted before pipeline load if needed.
+**Rejected alternative:** SDXL-Lightning 4-step — no pre-converted OV model exists; conversion requires ~1h and optimum-intel (broken in this venv).
+**Affects:** config.json, image_pipeline.py, model_manager.py
+
+### 2026-05-11 — ov_monitor rewritten as Svelte web UI (skeleton)
+**Decision:** Replace terminal curses monitor with a Svelte 5 + Vite web UI served from ov_server at /monitor.
+**Rationale:** Svelte produces tiny bundles; fits the local embedded nature of the project. Web UI enables historical Postgres graphs (uPlot) that a terminal cannot show.
+**Rejected alternative:** Keep terminal monitor alongside web UI — doubles maintenance; terminal monitor is superceded.
+**Affects:** monitor/ (new), ov_server.py (/monitor/api/* stubs + StaticFiles mount)
+
 ### 2026-05-11 — Image/STT pipeline modules isolated from ov_server.py
 **Decision:** image_pipeline.py and stt_pipeline.py are standalone modules with module-level singletons and asyncio locks; ov_server.py imports and calls them.
 **Rationale:** Same pattern as model_manager.py — avoids circular imports, keeps ov_server.py as a thin HTTP layer, pipeline logic is testable in isolation (test_image_gen.py tests 1-3 run without a server).

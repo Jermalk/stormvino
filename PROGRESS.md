@@ -325,11 +325,21 @@
 
 ---
 
+### 2026-05-11 — Session 33 (f565ba5)
+**Working on:** FP16 SDXL switch + VRAM eviction guard + embedding threshold + ov_monitor skeleton
+**Last commit:** f565ba5 — feat: switch image model to sdxl-fp16-ov; fix test MODEL_DIR from config
+**Next action:** ov_monitor: npm install + implement Postgres stubs in /monitor/api/metrics; or basta-f1 query_decisions
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) SDXL/Whisper share GPU.1 — concurrent contention untested. (3) monitor/api/metrics Postgres stubs not yet implemented.
+**Tests:** 7/7 image_gen (FP16), 8/8 stt, 22/22 unit — all pass
+
+---
+
 ## NOW
 
-**Working on:** SDXL image generation + Whisper STT endpoints — complete
-**Last commit:** fbb157a — feat: SDXL image generation + Whisper STT endpoints
-**Next action:** basta-f1 query_decisions MCP tool; or embedding threshold 0.72 tuning
+**Working on:** FP16 SDXL + VRAM guard + embedding threshold + ov_monitor skeleton
+**Last commit:** f565ba5 — feat: switch image model to sdxl-fp16-ov; fix test MODEL_DIR from config
+**Next action:** ov_monitor skeleton — `cd monitor && npm install && npm run dev` to verify; then implement Postgres stubs
 **Blocked on:** nothing
-**Open questions:** (1) Embedding threshold 0.72 needs tuning. (2) InternVLAdapter tool calling deferred. (3) SDXL/Whisper share GPU.1 with LLM/VLM — concurrent load contention untested.
-**Tests:** 7/7 image_gen, 8/8 stt, 176/176 unit — all pass
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) monitor/api/metrics Postgres stubs TODO. (3) basta-f1 query_decisions MCP still pending.
+**Tests:** 7/7 image_gen (FP16), 8/8 stt, 22/22 unit — all pass
