@@ -90,7 +90,8 @@
                 "identify objects in the image"
             ],
             "models": [
-                { "id": "qwen2.5-vl-7b-int4-ov", "provider": "loc", "tier": "fast" }
+                { "id": "qwen2.5-vl-7b-int4-ov",    "provider": "loc", "tier": "fast" },
+                { "id": "internvl2.5-26b-int4-ov",   "provider": "loc", "tier": "best" }
             ]
         },
         "web_search": {

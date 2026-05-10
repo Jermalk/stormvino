@@ -436,11 +436,18 @@ async def list_models():
 
 async def _chat_vlm(req: ChatRequest):
     """Handle chat completions that contain image content (vision path)."""
-    if not VISION_MODEL:
-        raise HTTPException(status_code=400, detail="Image content received but no vision_model configured")
+    if not AVAILABLE_VLM_MODELS:
+        raise HTTPException(status_code=400, detail="Image content received but no vision model available")
 
-    pipe, tokenizer = await model_manager.get_vlm(VISION_MODEL)
-    model_id = VISION_MODEL
+    # Explicit model request takes priority over the configured default
+    if req.model in AVAILABLE_VLM_MODELS:
+        model_id = req.model
+    elif VISION_MODEL:
+        model_id = VISION_MODEL
+    else:
+        model_id = next(iter(AVAILABLE_VLM_MODELS))
+
+    pipe, tokenizer = await model_manager.get_vlm(model_id)
 
     messages = _limit_image_history(req.messages)
     images = [_pil_to_ov_tensor(img) for img in _extract_images(messages)]
