@@ -54,22 +54,45 @@ def has_images(messages: List[Message]) -> bool:
 # AutoTokenizer used instead of AutoProcessor to avoid the torchvision
 # dependency pulled in by Qwen2.5-VL's video processor.
 # ---------------------------------------------------------------------------
+def _vlm_content(m: "Message", template_is_simple: bool) -> Any:
+    """Convert message content for apply_chat_template.
+
+    Simple templates (e.g. InternVL) do plain string concatenation and cannot
+    handle list content — flatten to a string with <image> placeholders.
+    Rich templates (Qwen2.5-VL) accept list of typed content dicts.
+    """
+    if not isinstance(m.content, list):
+        return m.content or ""
+    if template_is_simple:
+        parts: List[str] = []
+        for p in m.content:
+            if p.type == "image_url":
+                parts.append("<image>")
+            elif p.type == "text" and p.text:
+                parts.append(p.text)
+        return "\n".join(parts)
+    # Rich template — pass typed content blocks
+    result: List[Dict[str, Any]] = []
+    for p in m.content:
+        if p.type == "image_url":
+            result.append({"type": "image"})
+        elif p.type == "text" and p.text:
+            result.append({"type": "text", "text": p.text})
+    return result
+
+
 def build_vlm_prompt(messages: List[Message], tokenizer: AutoTokenizer) -> str:
+    chat_tmpl = getattr(tokenizer, "chat_template", "") or ""
+    # Templates that do plain string concat cannot handle list content
+    template_is_simple = ("message['content']" in chat_tmpl
+                          or 'message["content"]' in chat_tmpl
+                          or not chat_tmpl)
     msg_dicts: List[Dict[str, Any]] = []
     has_system = any(m.role == "system" for m in messages)
     if not has_system:
         msg_dicts.append({"role": "system", "content": "You are a helpful assistant."})
     for m in messages:
-        if isinstance(m.content, list):
-            content: Any = []
-            for p in m.content:
-                if p.type == "image_url":
-                    content.append({"type": "image"})
-                elif p.type == "text" and p.text:
-                    content.append({"type": "text", "text": p.text})
-        else:
-            content = m.content or ""
-        msg_dicts.append({"role": m.role, "content": content})
+        msg_dicts.append({"role": m.role, "content": _vlm_content(m, template_is_simple)})
     return tokenizer.apply_chat_template(
         msg_dicts, tokenize=False, add_generation_prompt=True
     )

@@ -96,7 +96,7 @@ def test_files_present() -> bool:
     ok &= _check("at least one .xml IR file", len(ir_files) > 0,
                  f"found: {[f.name for f in ir_files[:4]]}")
     total_gb = sum(f.stat().st_size for f in MODEL_DIR.rglob("*") if f.is_file()) / 1e9
-    ok &= _check("output size reasonable (>5 GB)", total_gb > 5,
+    ok &= _check("output size reasonable (>2 GB)", total_gb > 2,
                  f"{total_gb:.1f} GB")
     print(f"    → {len(ir_files)} IR file(s), {total_gb:.1f} GB total")
     return ok

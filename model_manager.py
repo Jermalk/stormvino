@@ -390,7 +390,8 @@ async def get_vlm(model_id: str) -> Tuple[ov_genai.VLMPipeline, AutoTokenizer]:
             )
             tokenizer = await loop.run_in_executor(
                 None,
-                partial(AutoTokenizer.from_pretrained, AVAILABLE_VLM_MODELS[model_id])
+                partial(AutoTokenizer.from_pretrained, AVAILABLE_VLM_MODELS[model_id],
+                        trust_remote_code=True)
             )
             loaded_vlm_models[model_id] = pipe
             loaded_vlm_tokenizers[model_id] = tokenizer
