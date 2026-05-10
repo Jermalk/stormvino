@@ -343,3 +343,19 @@
 **Rationale:** A single 8GB constant was wrong in both directions: Qwen2.5-VL-7B only needs 3GB (wasted VRAM), Phi-4 and Qwen2.5-Coder-14B need 9GB (underprovided). Family context ceiling is read from `tokenizer_config.json` without loading the full tokenizer, avoiding a load-order problem (tokenizer currently loads AFTER pipeline).
 **Rejected alternative:** Move tokenizer load before pipeline to get adapter from the live tokenizer object — adds latency to every model load; JSON file read is faster and sufficient.
 **Affects:** server_config.py `compute_kv_cache_gb()`, `_detect_family_max_context()`, `_model_kv_gb()`
+
+---
+
+### 2026-05-10 — VLM tokenizer trust_remote_code
+**Decision:** Pass `trust_remote_code=True` to `AutoTokenizer.from_pretrained` in `get_vlm()`.
+**Rationale:** InternVL2.5 uses custom tokenizer code (InternLM2 tokenizer class). Without this flag, loading fails with a clear error. Qwen2.5-VL also uses custom code — the flag is safe to apply to all VLMs.
+**Rejected alternative:** Whitelist only InternVL — unnecessary complexity; all VLMs in this server are from trusted local conversion.
+**Affects:** model_manager.py `get_vlm()`
+
+---
+
+### 2026-05-10 — VLM prompt content flattening for simple jinja templates
+**Decision:** Detect "simple" chat templates (those that do plain string concatenation on `message['content']`) and flatten list content to a string with `<image>` placeholders, rather than passing typed content dicts.
+**Rationale:** InternVL's jinja template does `message['role'] + '\n' + message['content']` — a list content causes TypeError. Qwen2.5-VL's template handles typed dicts natively. Detection by checking for `message['content']` or `message["content"]` in the template string.
+**Rejected alternative:** Patch InternVL's chat_template.jinja — modifying exported model files is fragile.
+**Affects:** prompt_builder.py `build_vlm_prompt()`, `_vlm_content()`

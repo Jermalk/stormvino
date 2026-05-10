@@ -295,11 +295,21 @@
 
 ---
 
+### 2026-05-10 — Session 30 (12de032)
+**Working on:** InternVL2.5-8B conversion + integration, VLM fixes, basta-f1 project bootstrap, S2A/CMM design discussion
+**Last commit:** 12de032 — fix: InternVL2.5-8B VLM loading and prompt building
+**Next action:** Fix test 5 (last_routing_decision field in /health) + tests 3/7 (run with PYTHONPATH=/tmp/hf_shim); or move to basta-f1 first RAG work
+**Blocked on:** nothing
+**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor. (4) InternVLAdapter tool calling deferred. (5) test_internvl tests 3+7 fail due to hf-hub version conflict in test runner.
+**Tests:** 4/7 internvl tests pass — image inference works, explicit model selection works; 3 failures are test-env issues not server bugs
+
+---
+
 ## NOW
 
-**Working on:** Dynamic KV cache sizing complete; InternVL2.5-26B conversion in background
-**Last commit:** 7899ffb — feat: InternVL2.5-26B integration — multi-VLM routing, test suite, config
-**Next action:** When download finishes: `python3 autotest/test_internvl.py --load-only`, then restart server, then `python3 autotest/test_internvl.py`
-**Blocked on:** InternVL download (~3.8/52 GB done; PID 345796)
-**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor. (4) InternVLAdapter tool calling deferred until model validated.
-**Tests:** not run this session — dynamic KV spot-checked via python3 -c inline test
+**Working on:** InternVL2.5-8B live, basta-f1 project created with S2A/CMM design
+**Last commit:** 12de032 — fix: InternVL2.5-8B VLM loading and prompt building
+**Next action:** basta-f1 — implement `query_decisions` MCP tool (first tool in build order); or fix remaining 3 test_internvl failures
+**Blocked on:** nothing
+**Open questions:** (1) STT Phase 1 queued. (2) Embedding threshold 0.72 needs tuning. (3) VRAM bar overcount in ov_monitor. (4) InternVLAdapter tool calling deferred. (5) test_internvl 3+7 hf-hub env issue.
+**Tests:** 4/7 test_internvl — image inference works end-to-end
