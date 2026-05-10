@@ -22,7 +22,7 @@ from prompt_builder import (
     ContentPart, Message,
     _text_content, build_vlm_prompt, build_prompt,
     _extract_agent_json, parse_tool_calls,
-    decode_result, extract_thinking, format_thinking,
+    decode_result, extract_thinking,
     ThinkStreamHandler, has_images, get_adapter,
 )
 
@@ -569,7 +569,10 @@ async def _chat_vlm(req: ChatRequest):
 
         raw_text = decode_result(raw)
         thinking, answer = extract_thinking(raw_text)
-        message = {"role": "assistant", "content": format_thinking(thinking, answer)}
+        if thinking:
+            message = {"role": "assistant", "content": answer, "reasoning_content": thinking}
+        else:
+            message = {"role": "assistant", "content": answer}
 
         completion_tokens = len(tokenizer.encode(answer or ""))
         tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
@@ -956,7 +959,10 @@ async def chat(req: ChatRequest):
                                                "tool_calls": tool_calls}
                                 _stream_stats["finish_reason"] = "tool_calls"
                             else:
-                                delta = {"content": format_thinking(thinking, answer)}
+                                if thinking and _active_profile != "fast":
+                                    delta = {"content": answer, "reasoning_content": thinking}
+                                else:
+                                    delta = {"content": answer}
                             buf_chunk = {
                                 "id": f"chatcmpl-{chunk_id}",
                                 "object": "chat.completion.chunk",
@@ -987,7 +993,10 @@ async def chat(req: ChatRequest):
                             }
                             yield f"data: {json.dumps(chunk)}\n\n"
             finally:
-                await gen_task
+                try:
+                    await gen_task
+                except Exception as exc:
+                    log.error(f"Generation error in token_generator: {exc}")
                 lock.release()
                 stats.active_requests -= 1
                 elapsed = time.time() - start
@@ -1052,7 +1061,10 @@ async def chat(req: ChatRequest):
             message = {"role": "assistant", "content": None, "tool_calls": tool_calls}
             finish_reason = "tool_calls"
         else:
-            message = {"role": "assistant", "content": format_thinking(thinking, answer)}
+            if thinking and _active_profile != "fast":
+                message = {"role": "assistant", "content": answer, "reasoning_content": thinking}
+            else:
+                message = {"role": "assistant", "content": answer}
             finish_reason = "length" if completion_tokens >= effective_max_tokens else "stop"
         tok_per_sec = completion_tokens / elapsed if elapsed > 0 else 0
         log.info(f"{req.model}: {completion_tokens} tokens in {elapsed:.1f}s = {tok_per_sec:.1f} tok/s | finish={finish_reason}")
