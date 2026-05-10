@@ -91,7 +91,7 @@
             ],
             "models": [
                 { "id": "qwen2.5-vl-7b-int4-ov",    "provider": "loc", "tier": "fast" },
-                { "id": "internvl2.5-26b-int4-ov",   "provider": "loc", "tier": "best" }
+                { "id": "internvl2.5-8b-int4-ov",    "provider": "loc", "tier": "best" }
             ]
         },
         "web_search": {

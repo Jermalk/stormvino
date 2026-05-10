@@ -7,7 +7,7 @@ Tests (in order):
   3. Text-only inference — model answers a simple question without an image
   4. Image inference — model describes a synthetic test image via server API
   5. Routing — Auto model with image routes to a VLM (not text LLM)
-  6. Explicit model selection — sending model=internvl2.5-26b-int4-ov hits that model
+  6. Explicit model selection — sending model=internvl2.5-8b-int4-ov hits that model
   7. Adapter detection — InternVLAdapter is returned for the InternVL tokenizer
 
 Usage:
@@ -25,7 +25,7 @@ from pathlib import Path
 
 import httpx
 
-MODEL_DIR = Path("/opt/ov_server/models/internvl2.5-26b-int4-ov")
+MODEL_DIR = Path("/opt/ov_server/models/internvl2.5-8b-int4-ov")
 DEVICE = "GPU.1"
 BASE = "http://localhost:11435"
 TIMEOUT = 300.0
@@ -238,10 +238,10 @@ def test_routing_auto() -> bool:
 # ---------------------------------------------------------------------------
 
 def test_explicit_model() -> bool:
-    print("\n[6] Explicit model=internvl2.5-26b-int4-ov selection")
+    print("\n[6] Explicit model=internvl2.5-8b-int4-ov selection")
     img_b64 = _make_test_image_b64()
     payload = {
-        "model": "internvl2.5-26b-int4-ov",
+        "model": "internvl2.5-8b-int4-ov",
         "messages": [{
             "role": "user",
             "content": [
@@ -255,7 +255,7 @@ def test_explicit_model() -> bool:
     try:
         resp = _post("/v1/chat/completions", payload)
         model_used = resp.get("model", "")
-        ok = _check("model=internvl2.5-26b-int4-ov used",
+        ok = _check("model=internvl2.5-8b-int4-ov used",
                     "internvl" in model_used.lower(), f"got '{model_used}'")
         content = resp["choices"][0]["message"]["content"]
         print(f"    → answer: {content[:100]!r}")
@@ -324,7 +324,7 @@ def main() -> None:
         except Exception as e:
             print(f"Server unreachable: {e}")
             sys.exit(1)
-        run(test_image_via_api, "internvl2.5-26b-int4-ov")
+        run(test_image_via_api, "internvl2.5-8b-int4-ov")
         run(test_routing_auto)
         run(test_explicit_model)
     elif args.load_only:
@@ -336,7 +336,7 @@ def main() -> None:
         run(test_text_inference)
         try:
             _get("/health")
-            run(test_image_via_api, "internvl2.5-26b-int4-ov")
+            run(test_image_via_api, "internvl2.5-8b-int4-ov")
             run(test_routing_auto)
             run(test_explicit_model)
         except Exception:
