@@ -6,6 +6,24 @@
 
 ---
 
+### 2026-05-10 — Python coding standards adopted with risk triage
+**Decision:** coding_standards_python.json adopted after removing risky techniques and marking 2nd-order ones explicitly.
+**Rationale:** `closed=True` (Python 3.15+) and Zuban checker removed — incompatible with Python 3.12 environment. Async stack mocking removed — would mask real production bugs in AsyncTokenStreamer. 2nd-order techniques (TypedDict, Protocol, TypeVar) require explicit `apply_when` condition before use.
+**Rejected alternative:** Adopt all standards as-is — risks false safety from wrong Python version features and dangerous mock coverage.
+**Affects:** coding_standards_python.json, CLAUDE.md
+
+### 2026-05-10 — Module split plan: shared mutable state via _cfg dict
+**Decision:** Mutable globals (DEFAULT_MODEL, AGENT_MODEL, MAX_LOADED_MODELS) to be stored in _cfg dict, not as module-level constants. All modules import _cfg by reference from server_config.py.
+**Rationale:** Python import bindings are local copies — reassigning a module-level name in one module is invisible to others. Dicts are shared by reference. _apply_profile() mutations to _cfg["max_loaded_models"] are immediately visible to model_manager.py without any special wiring.
+**Rejected alternative:** Module-level constants with setter functions — more boilerplate, same effect.
+**Affects:** plans/20260510_PLAN_split.md, ov_server.py (Step 0)
+
+### 2026-05-10 — Hybrid Aider workflow: files kept, operation marked highly optional
+**Decision:** CONVENTIONS.md and .aider.conf.yml kept in repo; active use of local models via Aider marked as highly optional.
+**Rationale:** Feasibility assessment scored Qwen3-30b-a3b and Qwen2.5-14b-coder at ~38/100 vs Claude Code. The Qwen3-30b-a3b "30B" is misleading — only 3B parameters active per forward pass. Workflow friction cancels time savings for a single-developer project. Files retained for their documentation value (CONVENTIONS.md) and future use if a high-volume mechanical task warrants it.
+**Rejected alternative:** Remove the files — they document project conventions in machine-readable form regardless of Aider usage.
+**Affects:** CONVENTIONS.md, .aider.conf.yml, plans/20260510_PLAN_split.md, plans/local_model_planning_logic.md
+
 ### 2026-05-06 — aider installed in ov_env, george alias defaults to qwen3-14b + diff format
 **Decision:** aider installed into `/home/jerzy/ov_env` (not pipx); `george` alias uses `qwen3-14b-int4-ov` with `--edit-format diff`.
 **Rationale:** pipx unavailable without sudo; ov_env is the practical install target. diff format prevents whole-file truncation bugs (observed: `1.:0` SQL hallucination propagated through 3 rewrites when using whole format).

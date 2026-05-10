@@ -255,11 +255,21 @@
 
 ---
 
+### 2026-05-10 — Session 26 (c58ca3c)
+**Working on:** Planning session — Python coding standards, ov_server.py module split plan, hybrid Aider workflow
+**Last commit:** c58ca3c — docs: split plan, CONVENTIONS.md, and Aider config
+**Next action:** n8n AI Agent node validation (tool call loop); OR ov_server.py module split Step 0 (plans/20260510_PLAN_split.md)
+**Blocked on:** nothing
+**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor.
+**Tests:** not run — planning session, no server code changed
+
+---
+
 ## NOW
 
-**Working on:** Docker management documented; all features working end-to-end
-**Last commit:** (this wrap commit)
-**Next action:** n8n AI Agent node validation (tool call loop); or VRAM bar overcount fix in ov_monitor
+**Working on:** Planning session — coding standards, module split plan, hybrid workflow feasibility
+**Last commit:** (session-wrap commit)
+**Next action:** n8n AI Agent node validation (tool call loop); OR ov_server.py module split Step 0 (plans/20260510_PLAN_split.md)
 **Blocked on:** nothing
-**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar in ov_monitor shows >100% (disk-size overcount).
-**Tests:** pass (176/176)
+**Open questions:** (1) STT Phase 1 still queued. (2) Embedding threshold 0.72 needs live tuning. (3) VRAM bar overcount in ov_monitor.
+**Tests:** not run — planning session, no server code changed
