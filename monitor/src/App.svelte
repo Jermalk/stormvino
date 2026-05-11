@@ -1,17 +1,19 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { fetchHealth, fetchSystem } from './lib/api.js'
-  import VramBar      from './lib/VramBar.svelte'
-  import ServerPanel  from './lib/ServerPanel.svelte'
-  import GpuPanel     from './lib/GpuPanel.svelte'
+  import { fetchHealth, fetchSystem, fetchProfilerStatus } from './lib/api.js'
+  import VramBar       from './lib/VramBar.svelte'
+  import ServerPanel   from './lib/ServerPanel.svelte'
+  import GpuPanel      from './lib/GpuPanel.svelte'
   import ProfilesPanel from './lib/ProfilesPanel.svelte'
-  import SystemPanel  from './lib/SystemPanel.svelte'
-  import Charts       from './lib/Charts.svelte'
+  import ProfilerPanel from './lib/ProfilerPanel.svelte'
+  import SystemPanel   from './lib/SystemPanel.svelte'
+  import Charts        from './lib/Charts.svelte'
 
-  let health = $state(null)
-  let sys    = $state(null)
-  let error  = $state(null)
-  let timers = []
+  let health   = $state(null)
+  let sys      = $state(null)
+  let profiler = $state(null)
+  let error    = $state(null)
+  let timers   = []
 
   async function pollHealth() {
     try { health = await fetchHealth(); error = null }
@@ -23,10 +25,16 @@
     catch { sys = null }
   }
 
+  async function pollProfiler() {
+    try { profiler = await fetchProfilerStatus() }
+    catch { profiler = null }
+  }
+
   onMount(() => {
-    pollHealth(); pollSystem()
-    timers.push(setInterval(pollHealth,  2000))
-    timers.push(setInterval(pollSystem,  3000))
+    pollHealth(); pollSystem(); pollProfiler()
+    timers.push(setInterval(pollHealth,   2000))
+    timers.push(setInterval(pollSystem,   3000))
+    timers.push(setInterval(pollProfiler, 4000))
   })
   onDestroy(() => timers.forEach(clearInterval))
 </script>
@@ -56,6 +64,8 @@
     </div>
     <div class="cell border-right border-top">
       <ProfilesPanel {health} />
+      <div class="divider"></div>
+      <ProfilerPanel {profiler} />
     </div>
     <div class="cell border-top">
       <SystemPanel {sys} />
@@ -114,6 +124,7 @@
   .cell { background: var(--bg); }
   .border-right  { border-right:  1px solid var(--border); }
   .border-top    { border-top:    1px solid var(--border); }
+  .divider { border-top: 1px solid var(--border); margin: 0 1rem; }
 
   .charts-row {
     border-top: 1px solid var(--border);
