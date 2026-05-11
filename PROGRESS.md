@@ -355,9 +355,9 @@
 
 ## NOW
 
-**Working on:** VRAM profiler — Step 1 done (DB table + write/read functions)
-**Last commit:** e192bc9 — feat: live profile config in health + dynamic ProfilesPanel descriptions
-**Next action:** VRAM profiler Step 2 — lazy measurement in `_load_model` and `_load_vlm` in `model_manager.py`
+**Working on:** Profile routing + VLM coexistence — all profile switches now correct
+**Last commit:** 7937b0d — fix: tier-aware routing + VLM coexistence
+**Next action:** VRAM profiler Steps 3–8 still in plan (background profiler, /admin/profile-models endpoint) — or next user-directed task
 **Blocked on:** nothing
-**Open questions:** (1) VLM VRAM footprint — answered by Step 2 measurement. (2) Assessor GPU device. (3) InternVLAdapter deferred.
-**Tests:** Step 1 round-trip verified (write + read via psql); 176/176 unit tests not re-run yet
+**Open questions:** (1) Assessor GPU device. (2) InternVLAdapter tool calling deferred. (3) First Precise switch after cold restart evicts VLM (conservative — fixed after first load).
+**Tests:** profile cycle verified live: Fast=8b+VLM ✓, Precise=14b+VLM ✓, Laborious=Mistral ✓, Fast=8b+VLM ✓
