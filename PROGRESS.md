@@ -383,11 +383,21 @@
 
 ---
 
+### 2026-05-11 — Session 39 (7f26176)
+**Working on:** #code/#document/#general directives, monitor sidecar, max_new_tokens floor fix
+**Last commit:** 7f26176 — fix: profile max_new_tokens as floor
+**Next action:** SVP Phase 4 — Postgres time-series charts (plans/20260511_PLAN_svp.md § Phase 4)
+**Blocked on:** sidecar systemd service needs sudo install (unit file at /tmp/ov-monitor-sidecar.service)
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
+**Tests:** sidecar smoke-tested locally; max_tokens floor verified; build clean 126KB
+
+---
+
 ## NOW
 
-**Working on:** Loading indicator fully fixed — VLM tracking + sticky logic repaired
-**Last commit:** b3a7e12 — fix: loading indicator — track VLM loads + fix sticky logic
+**Working on:** Session 39 complete — sidecar, directives, token floor
+**Last commit:** 7f26176 — fix: profile max_new_tokens as floor
 **Next action:** SVP Phase 4 — Postgres time-series charts (plans/20260511_PLAN_svp.md § Phase 4)
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
-**Tests:** ps=True lm=qwen3-14b confirmed at 500ms poll mid-switch; build clean
+**Tests:** all pass — health ok, token floor verified, build clean
