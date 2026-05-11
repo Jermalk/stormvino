@@ -1,66 +1,56 @@
 <script>
-  import { onDestroy } from 'svelte'
-
-  let { health } = $props()
-
   const COLORS = ['#4e9af1', '#9b6ef3', '#4ef1a0', '#f7c44e', '#f1544e']
 
+  let { health, vramLive } = $props()
+
+  // Use sidecar's live VRAM for total/used; fall back to health if sidecar not yet ready.
+  const totalGb = $derived(health?.vram_total_gb ?? vramLive?.total_gb ?? 22.71)
+
+  // Live server-process VRAM from sidecar — grows during model load.
+  const liveServerGb = $derived(vramLive?.by_proc?.['ov_server'] ?? 0)
+
+  // Per-model coloured segments from server health (registered models only).
   const segments = $derived.by(() => {
     if (!health) return []
-    const totalGb = health.vram_total_gb ?? 0
     if (!totalGb) return []
-    const vlmIds  = new Set(health.loaded_vlm_models ?? [])
-    const kvGb    = health.kv_cache_size_gb ?? 0
-    const aKvGb   = health.assessor_kv_cache_size_gb ?? kvGb
-    const alloc   = health.vram_allocated_gb ?? {}
+    const vlmIds = new Set(health.loaded_vlm_models ?? [])
+    const kvGb   = health.kv_cache_size_gb ?? 0
+    const aKvGb  = health.assessor_kv_cache_size_gb ?? kvGb
+    const alloc  = health.vram_allocated_gb ?? {}
     return Object.entries(alloc).map(([id, allocGb], i) => {
       const isVlm     = vlmIds.has(id)
       const thisKv    = id === '_assessor' ? aKvGb : kvGb
       const weightsGb = isVlm ? allocGb : Math.max(0, allocGb - thisKv)
       const kvSegGb   = isVlm ? 0 : thisKv
       const color     = COLORS[i % COLORS.length]
-      return { id, weightsGb, kvSegGb, color, totalGb, isVlm,
+      return { id, weightsGb, kvSegGb, color, isVlm,
                wPct: weightsGb / totalGb * 100,
                kPct: kvSegGb   / totalGb * 100 }
     })
   })
 
-  const usedGb   = $derived(Object.values(health?.vram_allocated_gb ?? {}).reduce((s, v) => s + v, 0))
-  const totalGb  = $derived(health?.vram_total_gb ?? 0)
-  const freeGb   = $derived(Math.max(0, totalGb - usedGb))
-  const pct      = $derived(totalGb ? usedGb / totalGb * 100 : 0)
-  const over     = $derived(pct > 100)
-  const loadingId    = $derived(health?.loading_model_id ?? null)
-  const isSwitching  = $derived(health?.profile_switching ?? false)
-
-  // Sticky display: keep showing the last known loading model for 3s after it clears.
-  // Also triggers on profile_switching=true even before loadingId is set.
-  // stickyActive: true while switching/loading OR during the 3s hold-after.
-  // stickyId: the last model name seen (null = no name yet → show "Switching…").
-  let stickyActive = $state(false)
-  let stickyId     = $state(null)
-  let stickyTimer  = null
-
-  $effect(() => {
-    const active = loadingId || isSwitching
-    if (active) {
-      clearTimeout(stickyTimer)
-      stickyTimer  = null
-      stickyActive = true
-      if (loadingId) stickyId = loadingId  // preserve last known name while isSwitching
-    } else if (stickyActive) {
-      if (!stickyTimer) {
-        stickyTimer = setTimeout(() => { stickyActive = false; stickyId = null; stickyTimer = null }, 3000)
-      }
-    }
-  })
-
-  onDestroy(() => clearTimeout(stickyTimer))
-
-  const shortSticky = $derived(
-    stickyId ? stickyId.replace(/-int4-ov|-int8-ov|-fp16-ov|-int4|-int8/g, '') : null
+  // Allocated by OV (what the server knows about).
+  const allocatedSum = $derived(
+    Object.values(health?.vram_allocated_gb ?? {}).reduce((s, v) => s + v, 0)
   )
-  const showLoading = $derived(stickyActive || isSwitching)
+
+  // Loading gap: VRAM the server process holds beyond what's registered.
+  // Grows in real-time as a model loads. OV runtime overhead is ~0.9 GB,
+  // so threshold at 1.2 GB to avoid false animation at idle.
+  const loadingGb  = $derived(Math.max(0, liveServerGb - allocatedSum))
+  const loadingPct = $derived(loadingGb / totalGb * 100)
+  const showLoading = $derived(
+    loadingGb > 1.2 || !!(health?.loading_model_id) || !!(health?.profile_switching)
+  )
+
+  const usedGb = $derived(liveServerGb || allocatedSum)
+  const freeGb = $derived(Math.max(0, totalGb - usedGb))
+  const pct    = $derived(totalGb ? usedGb / totalGb * 100 : 0)
+  const over   = $derived(pct > 100)
+
+  const loadingLabel = $derived(health?.loading_model_id
+    ? health.loading_model_id.replace(/-int4-ov|-int8-ov|-fp16-ov|-int4|-int8/g, '')
+    : null)
 </script>
 
 <section class="vram-section">
@@ -78,9 +68,10 @@
       {/if}
     {/each}
     {#if showLoading}
-      <div class="seg loading-seg" style="flex:1" title="Loading {stickyId ?? '…'}">
+      <div class="seg loading-seg" style="width:{loadingPct}%; min-width:{loadingGb > 0.5 ? loadingPct : 2}%" title="Loading {loadingGb.toFixed(1)}GB">
         <div class="load-shimmer"></div>
       </div>
+      <div class="seg free" style="flex:1" title="free {freeGb.toFixed(1)}GB"></div>
     {:else}
       <div class="seg free" style="flex:1" title="free {freeGb.toFixed(1)}GB"></div>
     {/if}
@@ -99,7 +90,10 @@
     {#if showLoading}
       <span class="leg-item loading-item">
         <span class="dot loading-dot"></span>
-        <span class="leg-label">{shortSticky ? `Loading ${shortSticky}…` : 'Switching…'}</span>
+        <span class="leg-label">{loadingLabel ? `Loading ${loadingLabel}…` : 'Switching…'}</span>
+        {#if loadingGb > 0.5}
+          <span class="leg-detail">{loadingGb.toFixed(1)}GB</span>
+        {/if}
       </span>
     {:else}
       <span class="leg-item">
@@ -122,7 +116,7 @@
   .seg { height: 100%; transition: width .4s; }
   .free { background: transparent; }
 
-  .loading-seg { position: relative; overflow: hidden; }
+  .loading-seg { position: relative; overflow: hidden; transition: width .5s; }
   .load-shimmer {
     position: absolute; inset: 0;
     background: repeating-linear-gradient(90deg, transparent 0%, #f7c44e22 40%, #f7c44e44 50%, #f7c44e22 60%, transparent 100%);

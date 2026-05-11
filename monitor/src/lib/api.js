@@ -1,5 +1,19 @@
 const BASE = ''
 
+// Sidecar runs on :11436 — independent of ov_server, survives restarts.
+// Use window.location.hostname so the browser reaches the server's sidecar,
+// not localhost on the user's own machine.
+const SIDECAR_BASE =
+  typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:11436`
+    : 'http://localhost:11436'
+
+export async function fetchSidecar() {
+  const r = await fetch(`${SIDECAR_BASE}/metrics`)
+  if (!r.ok) throw new Error(`sidecar /metrics ${r.status}`)
+  return r.json()
+}
+
 export async function fetchHealth() {
   const r = await fetch(`${BASE}/health`)
   if (!r.ok) throw new Error(`/health ${r.status}`)

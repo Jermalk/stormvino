@@ -1,6 +1,6 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
-  import { fetchHealth, fetchSystem, fetchProfilerStatus } from './lib/api.js'
+  import { fetchSidecar, fetchProfilerStatus } from './lib/api.js'
   import VramBar       from './lib/VramBar.svelte'
   import ServerPanel   from './lib/ServerPanel.svelte'
   import GpuPanel      from './lib/GpuPanel.svelte'
@@ -11,20 +11,21 @@
   import ModelUsage      from './lib/ModelUsage.svelte'
   import CataloguePanel  from './lib/CataloguePanel.svelte'
 
-  let health   = $state(null)
-  let sys      = $state(null)
+  // Sidecar is the primary data source: health + system + live VRAM.
+  let metrics  = $state(null)
   let profiler = $state(null)
   let error    = $state(null)
   let timers   = []
 
-  async function pollHealth() {
-    try { health = await fetchHealth(); error = null }
-    catch (e) { error = e.message; health = null }
-  }
+  // Derived views used by child panels (same shape as before).
+  const health   = $derived(metrics?.server_health ?? null)
+  const sys      = $derived(metrics?.system        ?? null)
+  const vramLive = $derived(metrics?.vram_live      ?? null)
+  const serverUp = $derived(metrics?.server_up      ?? false)
 
-  async function pollSystem() {
-    try { sys = await fetchSystem() }
-    catch { sys = null }
+  async function pollSidecar() {
+    try { metrics = await fetchSidecar(); error = null }
+    catch (e) { error = e.message }
   }
 
   async function pollProfiler() {
@@ -33,10 +34,9 @@
   }
 
   onMount(() => {
-    pollHealth(); pollSystem(); pollProfiler()
-    timers.push(setInterval(pollHealth,   1000))
-    timers.push(setInterval(pollSystem,   3000))
-    timers.push(setInterval(pollProfiler, 4000))
+    pollSidecar(); pollProfiler()
+    timers.push(setInterval(pollSidecar,   1000))
+    timers.push(setInterval(pollProfiler,  4000))
   })
   onDestroy(() => timers.forEach(clearInterval))
 </script>
@@ -47,15 +47,17 @@
     <span class="host">EnvyStorm · localhost:11435</span>
     {#if error}
       <span class="error">{error}</span>
-    {:else if health}
-      <span class="heartbeat" title="connected">●</span>
+    {:else if serverUp}
+      <span class="heartbeat" title="server connected">●</span>
+    {:else if metrics}
+      <span class="server-down" title="server offline">⊘</span>
     {/if}
     <span class="clock">{new Date().toLocaleTimeString()}</span>
   </header>
 
   <!-- Row 1: VRAM bar -->
   <div class="vram-row">
-    <VramBar {health} />
+    <VramBar {health} {vramLive} />
   </div>
 
   <!-- Row 2: Server (40%) · Arc B60 (30%) · Profiles (30%) -->
@@ -111,8 +113,9 @@
   }
   .title     { font-weight: 700; letter-spacing: .04em; font-size: .9rem; }
   .host      { opacity: .35; font-size: .75rem; }
-  .heartbeat { color: var(--green); animation: pulse 2s infinite; }
-  .error     { color: var(--red); }
+  .heartbeat   { color: var(--green); animation: pulse 2s infinite; }
+  .server-down { color: var(--red); opacity: .7; }
+  .error       { color: var(--red); }
   .clock     { margin-left: auto; opacity: .35; font-size: .75rem; font-variant-numeric: tabular-nums; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
 
