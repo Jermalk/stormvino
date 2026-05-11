@@ -34,7 +34,7 @@
 
   onMount(() => {
     pollHealth(); pollSystem(); pollProfiler()
-    timers.push(setInterval(pollHealth,   2000))
+    timers.push(setInterval(pollHealth,   1000))
     timers.push(setInterval(pollSystem,   3000))
     timers.push(setInterval(pollProfiler, 4000))
   })

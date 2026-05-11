@@ -82,7 +82,7 @@
     {/each}
   </div>
 
-  {#if switching}
+  {#if switching || loadingModel}
     <div class="loading-bar">
       <div class="shimmer"></div>
       <span class="loading-text">

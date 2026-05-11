@@ -285,11 +285,13 @@ async def _apply_profile(name: str) -> None:
                 f"max_models={_cfg['max_loaded_models']} routing={routing_default}"
                 + ("" if kv_changed else " (LLMs retained)")
             )
-            # Proactively load target LLM (and VLM if it coexists) — gives
-            # immediate feedback in the monitor rather than waiting for first chat.
+            # Proactively load target LLM (and VLM if it coexists).
+            # _apply_profile is itself a create_task so awaiting here is fine —
+            # the 202 response is already sent; _profile_switching stays True
+            # until the load completes so the monitor shows the correct state.
             if target.get("provider", "loc") == "loc" and target_llm in AVAILABLE_MODELS:
                 log.info(f"Profile '{name}' — preloading '{target_llm}'")
-                asyncio.create_task(_warm_profile_models(target_llm, primary_vlm if vlm_can_stay else None))
+                await _warm_profile_models(target_llm, primary_vlm if vlm_can_stay else None)
         except Exception as exc:
             log.error(f"Profile switch to '{name}' failed: {exc}")
         finally:
