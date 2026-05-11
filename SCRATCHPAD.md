@@ -4,5 +4,5 @@
 > Format: bullet points, max 5 lines per topic, no prose.
 
 ## Carried over:
-Session 37: SVP layout redesign (4-row) done. OVH proxy streaming crash fixed. qwen3-coder-30b-a3b-int4-ov confirmed working. config.json: code class updated — qwen3-coder-30b→best, Mistral→balanced, max_loaded_models=2, embedding_device=GPU.1, phi-4 unblocked. Session wrapped.
+Session 38: SVP Phase 3 complete (CataloguePanel, ServerPanel routing detail, VramBar loading indicator). Loading indicator root-cause analysis done — two bugs fixed: (1) get_vlm() never set _loading_model_id, (2) VramBar sticky effect overwrote stickyId=null when isSwitching=True but loadingId=null. Verified: ps=True lm=qwen3-14b catchable at 500ms poll mid-switch. Next: SVP Phase 4 (Postgres time-series charts).
 

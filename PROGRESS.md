@@ -373,11 +373,21 @@
 
 ---
 
-## NOW
-
-**Working on:** Config updated — qwen3-coder-30b as best local code tier
-**Last commit:** 986cf46 — feat: qwen3-coder-30b-a3b-int4-ov as best local code model; Mistral→balanced
-**Next action:** SVP Phase 3 — model catalogue panel + routing detail (plans/20260511_PLAN_svp.md § Phase 3)
+### 2026-05-11 — Session 38 (b3a7e12)
+**Working on:** SVP Phase 3 (catalogue + routing detail) + loading indicator fix
+**Last commit:** b3a7e12 — fix: loading indicator — track VLM loads + fix sticky logic
+**Next action:** SVP Phase 4 — Postgres time-series charts (VRAM + system_snapshots) — plans/20260511_PLAN_svp.md § Phase 4
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
-**Tests:** server /health OK; build passes
+**Tests:** loading indicator confirmed catchable at 500ms poll; build passes (125.42kB)
+
+---
+
+## NOW
+
+**Working on:** Loading indicator fully fixed — VLM tracking + sticky logic repaired
+**Last commit:** b3a7e12 — fix: loading indicator — track VLM loads + fix sticky logic
+**Next action:** SVP Phase 4 — Postgres time-series charts (plans/20260511_PLAN_svp.md § Phase 4)
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
+**Tests:** ps=True lm=qwen3-14b confirmed at 500ms poll mid-switch; build clean
