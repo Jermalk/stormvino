@@ -399,7 +399,10 @@ async def health():
         "vram_total_gb":     round(model_manager._TOTAL_VRAM_GB, 2) if model_manager._TOTAL_VRAM_GB else None,
         "vram_allocated_gb": {k: round(v, 2) for k, v in model_manager._vram_allocated.items()},
         "vram_free_gb":      round(model_manager.vram_free_gb(), 2) if model_manager.vram_free_gb() is not None else None,
-        "kv_cache_size_gb":          _cfg.get("kv_cache_size_gb", 8),
+        "kv_cache_size_gb":          (
+            _model_kv_gb(next(iter(model_manager.loaded_models), ""))
+            if model_manager.loaded_models else _cfg.get("kv_cache_size_gb", 8)
+        ),
         "assessor_kv_cache_size_gb": _cfg.get("assessor", {}).get("kv_cache_size_gb", 2),
         "active_profile":        _active_profile,
         "profile_switching":     _profile_switching,
