@@ -49,3 +49,10 @@ export async function fetchProfilerStatus() {
 export async function triggerProfiling() {
   await fetch(`${BASE}/admin/profile-models`, { method: 'POST' })
 }
+
+export async function fetchModels() {
+  const r = await fetch(`${BASE}/v1/models`)
+  if (!r.ok) throw new Error(`/v1/models ${r.status}`)
+  const data = await r.json()
+  return data.data ?? []
+}

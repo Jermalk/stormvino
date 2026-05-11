@@ -27,18 +27,20 @@ _catalogue_cache: dict[str, tuple[list[dict], float]] = {}
 # keyed by provider name ("ovh"), value is (entries, fetched_at_timestamp)
 
 
+_TIER_RANK: dict[str, int] = {"fast": 1, "balanced": 2, "best": 3}
+
+
 def _tier_map_for_provider(provider: str) -> dict[str, str]:
     """Return {model_id: tier} for the given provider, derived from task_classes.
-    A model appearing in multiple classes gets the highest tier found ("best" > "fast")."""
+    A model appearing in multiple classes gets the highest tier found (best > balanced > fast)."""
     result: dict[str, str] = {}
     for cls_cfg in _cfg.get("task_classes", {}).values():
         for m in cls_cfg.get("models", []):
             if m.get("provider") == provider:
                 mid = m["id"]
-                if m.get("tier") == "best" or result.get(mid) == "best":
-                    result[mid] = "best"
-                else:
-                    result.setdefault(mid, "fast")
+                new_tier = m.get("tier", "fast")
+                if _TIER_RANK.get(new_tier, 1) > _TIER_RANK.get(result.get(mid, "fast"), 1):
+                    result[mid] = new_tier
     return result
 
 

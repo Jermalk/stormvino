@@ -6,6 +6,8 @@
   const busySec = $derived(health?.busy_for_sec ?? 0)
   const rd      = $derived(health?.last_routing_decision ?? null)
   const scope   = $derived(health?.provider_scope ?? 'local')
+
+  let rdExpanded = $state(false)
 </script>
 
 <section class="panel">
@@ -71,13 +73,32 @@
         <tr class="spacer"><td colspan="2"></td></tr>
 
         {#if rd}
-          <tr>
+          <tr class="route-row" onclick={() => rdExpanded = !rdExpanded} title="Click to expand routing detail">
             <td>Last route</td>
             <td class="mono route">
               {rd.task_class ?? '—'} → {rd.model ?? '—'}
-              <span class="dim">[{rd.strategy ?? ''}{rd.confidence != null ? ` {(rd.confidence*100).toFixed(0)}%` : ''}{rd.latency_ms != null ? ` {rd.latency_ms}ms` : ''}]</span>
+              <span class="dim">[{rd.strategy ?? ''}{rd.confidence != null ? ` ${(rd.confidence*100).toFixed(0)}%` : ''}{rd.latency_ms != null ? ` ${rd.latency_ms}ms` : ''}]</span>
+              <span class="expand-caret">{rdExpanded ? '▲' : '▼'}</span>
             </td>
           </tr>
+          {#if rdExpanded}
+            <tr class="route-detail">
+              <td colspan="2">
+                <table class="rd-table">
+                  <tbody>
+                    <tr><td>Task class</td><td>{rd.task_class ?? '—'}</td></tr>
+                    <tr><td>Strategy</td><td class:hl-strategy={true}>{rd.strategy ?? '—'}</td></tr>
+                    <tr><td>Confidence</td><td>{rd.confidence != null ? `${(rd.confidence*100).toFixed(1)}%` : '—'}</td></tr>
+                    <tr><td>Latency</td><td>{rd.latency_ms != null ? `${rd.latency_ms} ms` : '—'}</td></tr>
+                    <tr><td>Model</td><td class="mono-sm">{rd.model ?? '—'}</td></tr>
+                    {#if rd.cloud_directive}
+                      <tr><td>Directive</td><td class="hl-cloud">#cloud override</td></tr>
+                    {/if}
+                  </tbody>
+                </table>
+              </td>
+            </tr>
+          {/if}
         {/if}
 
         {#if health.last_model}
@@ -107,6 +128,18 @@
   .offline { color: var(--red); font-weight: 700; }
   .dim    { opacity: .35; }
   .hl     { color: var(--blue); }
-  .mono   { font-family: monospace; font-size: .78rem; word-break: break-all; }
-  .route  { font-size: .75rem; }
+  .mono     { font-family: monospace; font-size: .78rem; word-break: break-all; }
+  .mono-sm  { font-family: monospace; font-size: .72rem; }
+  .route    { font-size: .75rem; }
+
+  .route-row { cursor: pointer; }
+  .route-row:hover td { opacity: .85; }
+  .expand-caret { margin-left: .3rem; opacity: .4; font-size: .65rem; }
+
+  .route-detail td { padding-top: 0; padding-bottom: .4rem; }
+  .rd-table { width: 100%; border-collapse: collapse; font-size: .75rem; }
+  .rd-table td { padding: .1rem 0; }
+  .rd-table td:first-child { opacity: .45; width: 6rem; }
+  .rd-table tr:first-child td { padding-top: .25rem; }
+  .hl-cloud { color: var(--yellow); }
 </style>

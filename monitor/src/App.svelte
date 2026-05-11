@@ -7,8 +7,9 @@
   import ProfilesPanel from './lib/ProfilesPanel.svelte'
   import ProfilerPanel from './lib/ProfilerPanel.svelte'
   import SystemPanel   from './lib/SystemPanel.svelte'
-  import Charts        from './lib/Charts.svelte'
-  import ModelUsage    from './lib/ModelUsage.svelte'
+  import Charts          from './lib/Charts.svelte'
+  import ModelUsage      from './lib/ModelUsage.svelte'
+  import CataloguePanel  from './lib/CataloguePanel.svelte'
 
   let health   = $state(null)
   let sys      = $state(null)
@@ -83,7 +84,12 @@
     </div>
   </div>
 
-  <!-- Row 4: History chart (100%) -->
+  <!-- Row 4: Model catalogue (100%) -->
+  <div class="row full border-top">
+    <CataloguePanel {profiler} />
+  </div>
+
+  <!-- Row 5: History chart (100%) -->
   <div class="row full border-top">
     <Charts />
   </div>
