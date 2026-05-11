@@ -492,6 +492,14 @@ async def _warm_vlm(model_id: str) -> None:
 # Background VRAM profiler (Step 4)
 # ---------------------------------------------------------------------------
 _profiler_running: bool = False
+_profiler_status: dict = {
+    "running":      False,
+    "current":      None,
+    "pending_llms": [],
+    "pending_vlms": [],
+    "profiled":     [],
+    "started_at":   None,
+}
 
 
 async def run_background_profiler(
@@ -500,13 +508,15 @@ async def run_background_profiler(
     *,
     is_idle: "callable[[], bool]",
     resume_model_id: str | None = None,
+    resume_vlm_id: str | None = None,
+    initial_delay_s: float = 0.0,
 ) -> None:
     """Load → measure → evict each unmeasured model at idle.
 
-    Skips models already in _vram_measured (accurate data in hand).
-    Skips blocked models (config.blocked_models).
-    Waits up to 60s for idle between each model; aborts if never idle.
-    Reloads resume_model_id after finishing if any model was profiled.
+    Skips models already in _vram_measured and blocked models.
+    Evicts all LLMs/VLMs before each profiling load so get_model()'s
+    MAX_LOADED_MODELS logic does not silently evict startup models.
+    Restores resume_model_id + resume_vlm_id when done.
     """
     global _profiler_running
     if _profiler_running:
@@ -515,37 +525,61 @@ async def run_background_profiler(
     _profiler_running = True
 
     blocked: list[str] = _cfg.get("blocked_models", [])
+    pending_llms = [m for m in llm_ids if m not in blocked and m not in _vram_measured]
+    pending_vlms = [m for m in vlm_ids if m not in blocked and m not in _vram_measured]
 
-    async def _wait_idle(timeout_s: float = 60.0) -> bool:
+    _profiler_status.update({
+        "running":      True,
+        "current":      None,
+        "pending_llms": list(pending_llms),
+        "pending_vlms": list(pending_vlms),
+        "profiled":     [],
+        "started_at":   time.time(),
+    })
+
+    if not pending_llms and not pending_vlms:
+        log.info("[profiler] all models already measured — nothing to do")
+        _profiler_running = False
+        _profiler_status["running"] = False
+        return
+
+    log.info(f"[profiler] {len(pending_llms)} LLM(s) + {len(pending_vlms)} VLM(s) need profiling: "
+             f"{pending_llms + pending_vlms}")
+
+    if initial_delay_s > 0:
+        log.info(f"[profiler] waiting {initial_delay_s:.0f}s for startup to settle...")
+        await asyncio.sleep(initial_delay_s)
+
+    async def _wait_idle(timeout_s: float = 120.0) -> bool:
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             if is_idle():
                 return True
-            await asyncio.sleep(2)
+            await asyncio.sleep(5)
         return False
 
     profiled: list[str] = []
 
     try:
-        for model_id in llm_ids:
-            if model_id in blocked:
-                continue
-            if model_id in _vram_measured:
-                log.info(f"[profiler] {model_id}: already measured ({_vram_measured[model_id]:.2f}GB) — skip")
-                continue
+        for model_id in pending_llms:
+            _profiler_status["current"] = model_id
             if not await _wait_idle():
-                log.warning(f"[profiler] server busy — aborting before {model_id}")
+                log.warning(f"[profiler] server busy after 120s — aborting before '{model_id}'")
                 return
 
             log.info(f"[profiler] measuring LLM '{model_id}'...")
+            # Evict all LLMs first — prevents get_model()'s MAX_LOADED_MODELS logic from
+            # silently evicting whatever was loaded (e.g., the startup agent model).
+            await evict_all_models()
             try:
                 await get_model(model_id)
                 profiled.append(model_id)
+                _profiler_status["profiled"].append(model_id)
+                _profiler_status["pending_llms"].remove(model_id)
             except Exception as exc:
                 log.warning(f"[profiler] failed to load '{model_id}': {exc}")
                 continue
 
-            # Evict immediately — profiler must not pin models
             async with _model_lock:
                 if model_id in loaded_models:
                     del loaded_models[model_id]
@@ -554,20 +588,19 @@ async def run_background_profiler(
                     _vram_allocated.pop(model_id, None)
                     gc.collect()
 
-        for vlm_id in vlm_ids:
-            if vlm_id in blocked:
-                continue
-            if vlm_id in _vram_measured:
-                log.info(f"[profiler] {vlm_id}: already measured ({_vram_measured[vlm_id]:.2f}GB) — skip")
-                continue
+        for vlm_id in pending_vlms:
+            _profiler_status["current"] = vlm_id
             if not await _wait_idle():
-                log.warning(f"[profiler] server busy — aborting before {vlm_id}")
+                log.warning(f"[profiler] server busy — aborting before VLM '{vlm_id}'")
                 return
 
             log.info(f"[profiler] measuring VLM '{vlm_id}'...")
+            await evict_all_vlms()
             try:
                 await get_vlm(vlm_id)
                 profiled.append(vlm_id)
+                _profiler_status["profiled"].append(vlm_id)
+                _profiler_status["pending_vlms"].remove(vlm_id)
             except Exception as exc:
                 log.warning(f"[profiler] failed to load VLM '{vlm_id}': {exc}")
                 continue
@@ -580,14 +613,19 @@ async def run_background_profiler(
                     _vram_allocated.pop(vlm_id, None)
                     gc.collect()
 
-        if profiled and resume_model_id:
-            log.info(f"[profiler] done — reloading resume model '{resume_model_id}'")
-            await _warm_model(resume_model_id)
+        if profiled:
+            _profiler_status["current"] = "restoring"
+            log.info(f"[profiler] profiled {profiled} — restoring startup models")
+            if resume_model_id:
+                await _warm_model(resume_model_id)
+            if resume_vlm_id:
+                await _warm_vlm(resume_vlm_id)
 
         log.info(f"[profiler] complete. Profiled: {profiled or 'none (all already measured)'}")
 
     finally:
         _profiler_running = False
+        _profiler_status.update({"running": False, "current": None})
 
 
 async def _load_assessor() -> None:

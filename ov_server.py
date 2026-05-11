@@ -363,12 +363,14 @@ async def _startup_preload() -> None:
     if VISION_MODEL:
         log.info(f"Scheduling startup preload of VLM '{VISION_MODEL}'")
         asyncio.create_task(model_manager._warm_vlm(VISION_MODEL))
-    # Background VRAM profiler — measures any model not yet in DB, runs only at idle
+    # Background VRAM profiler — 90s delay lets startup models finish loading before profiling begins
     asyncio.create_task(model_manager.run_background_profiler(
         list(AVAILABLE_MODELS),
         list(AVAILABLE_VLM_MODELS),
         is_idle=lambda: stats.active_requests == 0,
         resume_model_id=get_agent_model(),
+        resume_vlm_id=VISION_MODEL,
+        initial_delay_s=90.0,
     ))
 
 
@@ -476,6 +478,18 @@ async def set_profile(req: ProfileRequest):
     return JSONResponse(status_code=202, content={"accepted": True, "profile": req.profile})
 
 
+@app.get("/admin/profile-models")
+async def admin_profile_models_status() -> JSONResponse:
+    """Return VRAM profiling status and per-model measurements."""
+    measured = {k: round(v, 2) for k, v in model_manager._vram_measured.items()}
+    return JSONResponse({
+        **model_manager._profiler_status,
+        "vram_measured":   measured,
+        "unmeasured_llms": [m for m in AVAILABLE_MODELS   if m not in model_manager._vram_measured],
+        "unmeasured_vlms": [m for m in AVAILABLE_VLM_MODELS if m not in model_manager._vram_measured],
+    })
+
+
 @app.post("/admin/profile-models")
 async def admin_profile_models() -> JSONResponse:
     """Trigger on-demand VRAM profiling of all available models.
@@ -490,6 +504,7 @@ async def admin_profile_models() -> JSONResponse:
         list(AVAILABLE_VLM_MODELS),
         is_idle=lambda: stats.active_requests == 0,
         resume_model_id=get_agent_model(),
+        resume_vlm_id=VISION_MODEL,
     ))
     return JSONResponse(status_code=202, content={
         "status":  "started",
