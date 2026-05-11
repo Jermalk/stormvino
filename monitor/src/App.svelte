@@ -42,7 +42,7 @@
 
 <div class="layout">
   <header>
-    <span class="title">ov_monitor</span>
+    <span class="title">SVP</span>
     <span class="host">EnvyStorm · localhost:11435</span>
     {#if error}
       <span class="error">{error}</span>
@@ -52,34 +52,40 @@
     <span class="clock">{new Date().toLocaleTimeString()}</span>
   </header>
 
+  <!-- Row 1: VRAM bar -->
   <div class="vram-row">
     <VramBar {health} />
   </div>
 
-  <div class="main-grid">
-    <div class="cell border-right">
+  <!-- Row 2: Server (40%) · Arc B60 (30%) · Profiles (30%) -->
+  <div class="row tri">
+    <div class="cell wide border-right">
       <ServerPanel {health} />
     </div>
-    <div class="cell">
+    <div class="cell mid border-right">
       <GpuPanel {sys} />
     </div>
-    <div class="cell border-right border-top">
+    <div class="cell mid">
       <ProfilesPanel {health} />
-      <div class="divider"></div>
-      <ProfilerPanel {profiler} />
-    </div>
-    <div class="cell border-top">
-      <SystemPanel {sys} />
     </div>
   </div>
 
-  <div class="bottom-grid">
-    <div class="bottom-cell border-right">
-      <Charts />
+  <!-- Row 3: CPU + Memory (40%) · VRAM Profiler (30%) · Model usage (30%) -->
+  <div class="row tri border-top">
+    <div class="cell wide border-right">
+      <SystemPanel {sys} />
     </div>
-    <div class="bottom-cell">
+    <div class="cell mid border-right">
+      <ProfilerPanel {profiler} />
+    </div>
+    <div class="cell mid">
       <ModelUsage />
     </div>
+  </div>
+
+  <!-- Row 4: History chart (100%) -->
+  <div class="row full border-top">
+    <Charts />
   </div>
 </div>
 
@@ -116,37 +122,23 @@
   .clock     { margin-left: auto; opacity: .35; font-size: .75rem; font-variant-numeric: tabular-nums; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
 
-  .vram-row {
-    border-bottom: 1px solid var(--border);
-    background: var(--card);
-  }
+  .vram-row { border-bottom: 1px solid var(--border); background: var(--card); }
 
-  .main-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    flex: 1;
-  }
+  /* Rows */
+  .row { display: grid; min-width: 0; }
+  .tri  { grid-template-columns: 4fr 3fr 3fr; }   /* 40 · 30 · 30 */
+  .full { background: var(--card); }
 
-  .cell { background: var(--bg); }
-  .border-right  { border-right:  1px solid var(--border); }
-  .border-top    { border-top:    1px solid var(--border); }
-  .divider { border-top: 1px solid var(--border); margin: 0 1rem; }
+  /* Cells */
+  .cell       { background: var(--bg); min-width: 0; overflow: hidden; }
+  .wide       { /* 40% col — no extra class needed */ }
+  .mid        { /* 30% col — no extra class needed */ }
+  .border-right { border-right: 1px solid var(--border); }
+  .border-top   { border-top:   1px solid var(--border); }
 
-  .bottom-grid {
-    display: grid;
-    grid-template-columns: 2fr 1fr;
-    border-top: 1px solid var(--border);
-    background: var(--card);
-  }
-  .bottom-cell { min-width: 0; }
-
-  @media (max-width: 800px) {
-    .bottom-grid { grid-template-columns: 1fr; }
-    .bottom-cell.border-right { border-right: none; border-bottom: 1px solid var(--border); }
-  }
-
-  @media (max-width: 640px) {
-    .main-grid { grid-template-columns: 1fr; }
-    .border-right { border-right: none; }
+  /* Responsive: collapse to 1 column below 900px */
+  @media (max-width: 900px) {
+    .tri { grid-template-columns: 1fr; }
+    .border-right { border-right: none; border-bottom: 1px solid var(--border); }
   }
 </style>
