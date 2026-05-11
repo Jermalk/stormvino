@@ -93,6 +93,7 @@ import catalogue
 import router
 import image_pipeline
 import stt_pipeline
+import gpu_monitor
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +331,7 @@ async def _startup_preload() -> None:
     await router._load_embedding_centroids()    # blocking — centroids before assessor
     asyncio.create_task(model_manager._load_assessor())       # background — assessor pipeline
     asyncio.create_task(_system_snapshot_loop())
+    gpu_monitor.start()
     if get_agent_model():
         log.info(f"Scheduling startup preload of agent model '{get_agent_model()}'")
         asyncio.create_task(model_manager._warm_model(get_agent_model()))
@@ -1234,28 +1236,67 @@ async def audio_transcriptions(
 # (mount added in __main__ after middleware, only when dist/ exists)
 # ---------------------------------------------------------------------------
 
+@app.get("/monitor/api/system")
+async def monitor_system():
+    """GPU (temp/fan/power/engine%) + CPU + memory for the web monitor.
+
+    GPU data comes from gpu_monitor background poller (sysfs/debugfs, xe driver).
+    CPU/memory read live from psutil.
+    """
+    gpu = gpu_monitor.get_data()
+
+    cpu_pct = psutil.cpu_percent(interval=None)
+    per_core = psutil.cpu_percent(interval=None, percpu=True)
+    freq = psutil.cpu_freq()
+    load = list(psutil.getloadavg())
+
+    temps: dict[str, float] = {}
+    try:
+        for _name, entries in psutil.sensors_temperatures().items():
+            for e in entries:
+                if e.current and e.current > 0:
+                    temps[e.label or _name] = round(e.current, 1)
+    except Exception:
+        pass
+
+    vm = psutil.virtual_memory()
+    sw = psutil.swap_memory()
+
+    return {
+        "gpu": gpu,
+        "cpu": {
+            "percent":      cpu_pct,
+            "per_core":     per_core,
+            "freq_ghz":     round(freq.current / 1000, 2) if freq else None,
+            "freq_max_ghz": round(freq.max / 1000, 1) if freq else None,
+            "load_avg":     load,
+            "temps":        temps,
+        },
+        "memory": {
+            "ram_used_gb":   round(vm.used   / 1024 ** 3, 1),
+            "ram_total_gb":  round(vm.total  / 1024 ** 3, 1),
+            "ram_pct":       vm.percent,
+            "ram_avail_gb":  round(vm.available / 1024 ** 3, 1),
+            "swap_used_gb":  round(sw.used  / 1024 ** 3, 1),
+            "swap_total_gb": round(sw.total / 1024 ** 3, 1),
+            "swap_pct":      sw.percent,
+        },
+    }
+
+
 @app.get("/monitor/api/metrics")
 async def monitor_metrics(metric: str = "tok_per_sec", minutes: int = 60):
-    """Time-series data from Postgres for uPlot charts.
-
-    Returns {ts: [unix_epoch, ...], values: [float, ...]}.
-    Supported metrics: tok_per_sec, elapsed_sec, total_tokens.
-    """
-    # TODO: implement — query ov_metrics.request_log
-    # SELECT EXTRACT(EPOCH FROM completed_at)::int AS ts, <metric>
-    # FROM request_log
-    # WHERE completed_at > NOW() - INTERVAL '<minutes> minutes'
-    # ORDER BY completed_at
+    """Time-series from Postgres for uPlot. Returns {ts, values}."""
+    # TODO: SELECT EXTRACT(EPOCH FROM completed_at), <metric> FROM request_log
+    #       WHERE completed_at > NOW() - INTERVAL '<minutes> minutes'
     return {"ts": [], "values": [], "metric": metric, "minutes": minutes}
 
 
 @app.get("/monitor/api/model-usage")
 async def monitor_model_usage(hours: int = 24):
-    """Per-model request and token summary from Postgres.
-
-    Returns [{model_id, requests, avg_tok_per_sec, total_tokens}, ...].
-    """
-    # TODO: implement — query ov_metrics.request_log GROUP BY model_id
+    """Per-model request + token summary from Postgres."""
+    # TODO: SELECT model_id, COUNT(*), AVG(tok_per_sec), SUM(tokens)
+    #       FROM request_log GROUP BY model_id
     return []
 
 
