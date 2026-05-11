@@ -10,10 +10,13 @@
   ]
   const SCOPES = ['local', 'local+ovh', 'all']
 
-  const active     = $derived(health?.active_profile    ?? '')
-  const switching  = $derived(health?.profile_switching ?? false)
-  const scope      = $derived(health?.provider_scope    ?? 'local')
-  const profCfg    = $derived(health?.profiles_config   ?? {})
+  const active       = $derived(health?.active_profile    ?? '')
+  const switching    = $derived(health?.profile_switching ?? false)
+  const scope        = $derived(health?.provider_scope    ?? 'local')
+  const profCfg      = $derived(health?.profiles_config   ?? {})
+  const loadingModel = $derived(health?.loading_model_id  ?? null)
+
+  const shortModel = id => (id ?? '').replace(/-int4-ov|-int8-ov|-fp16-ov|-int4|-int8/g, '')
 
   function pref(name)   { return profCfg[name]?.model_preference ?? '—' }
   function think(name)  { return profCfg[name]?.thinking ?? false }
@@ -79,6 +82,19 @@
     {/each}
   </div>
 
+  {#if switching}
+    <div class="loading-bar">
+      <div class="shimmer"></div>
+      <span class="loading-text">
+        {#if loadingModel}
+          Loading {shortModel(loadingModel)}…
+        {:else}
+          Switching profile…
+        {/if}
+      </span>
+    </div>
+  {/if}
+
   <div class="controls">
     <div class="scope-row">
       <span class="slabel">Scope</span>
@@ -140,4 +156,27 @@
   .restart-btn:hover:not(:disabled) { opacity: 1; border-color: var(--red); color: var(--red); }
   .restart-btn.active { opacity: 1; border-color: var(--yellow); color: var(--yellow); }
   .restart-btn:disabled { cursor: not-allowed; }
+
+  .loading-bar {
+    position: relative; overflow: hidden;
+    background: #f7c44e0a; border: 1px solid #f7c44e22;
+    border-radius: 5px; padding: .35rem .7rem;
+    margin-bottom: .55rem;
+    display: flex; align-items: center; gap: .5rem;
+  }
+  .shimmer {
+    position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent 0%, #f7c44e18 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+  .loading-text {
+    position: relative; font-size: .76rem; color: var(--yellow);
+    font-family: monospace; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  @keyframes shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position:  200% 0; }
+  }
 </style>

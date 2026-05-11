@@ -42,6 +42,7 @@ emb_tokenizer = None
 _model_lock = asyncio.Lock()
 _infer_locks: Dict[str, asyncio.Lock] = {}
 _emb_lock = asyncio.Lock()
+_loading_model_id: str | None = None
 
 loaded_vlm_models: Dict[str, ov_genai.VLMPipeline] = {}
 loaded_vlm_tokenizers: Dict[str, AutoTokenizer] = {}
@@ -270,8 +271,10 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
         else:
             log.debug("VRAM query unavailable — relying on model count limit only")
 
+        global _loading_model_id
         weights_gb = model_size_gb(model_id)
         log.info(f"Loading {model_id} (~{weights_gb:.1f}GB)...")
+        _loading_model_id = model_id
 
         async def _do_load() -> ov_genai.LLMPipeline:
             loop = asyncio.get_running_loop()
@@ -354,6 +357,7 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
             log.error(f"Failed to load tokenizer for {model_id}: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+        _loading_model_id = None
         loaded_models[model_id] = pipe
         loaded_tokenizers[model_id] = tokenizer
         model_last_used[model_id] = time.time()

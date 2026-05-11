@@ -441,6 +441,7 @@ async def health():
         "active_profile":        _active_profile,
         "profiles_config":       _cfg.get("profiles", {}),
         "profile_switching":     _profile_switching,
+        "loading_model_id":      model_manager._loading_model_id,
         "routing_backend":       _cfg.get("routing", {}).get("default", "local"),
         "provider_scope":        _cfg.get("provider_scope", "local"),
         "last_routing_decision": router._last_routing_decision,
