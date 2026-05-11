@@ -46,6 +46,20 @@ SIMPLE_Q_RE = re.compile(
 _SIGNAL_ONLY_CLASSES: frozenset[str] = frozenset({"has_image", "has_tools"})
 
 _CLOUD_DIRECTIVE_RE = re.compile(r'#(ovh|cloud)\b', re.IGNORECASE)
+_TASK_DIRECTIVE_RE  = re.compile(r'#(code|document|general)\b', re.IGNORECASE)
+
+_TASK_DIRECTIVE_MAP: dict[str, str] = {
+    "code":     "code",
+    "document": "document",
+    "general":  "general",
+}
+
+
+def task_class_directive(messages: list) -> str | None:
+    """Return task_class if the last user message contains #code, #document, or #general."""
+    last_user = next((_text_content(m) for m in reversed(messages) if m.role == "user"), "")
+    m = _TASK_DIRECTIVE_RE.search(last_user)
+    return _TASK_DIRECTIVE_MAP.get(m.group(1).lower()) if m else None
 
 
 # ---------------------------------------------------------------------------
@@ -56,11 +70,17 @@ def _detect_signal(req: Any) -> str | None:
     """Return task_class name if a fast-path signal fires, else None.
 
     Checked in priority order:
+      0. hashtag directive (#code / #document / #general) → explicit override
       1. image content  → "vision"
       2. client tools   → "web_search"
       3. long context   → "document"
       4. keyword match  → task_class from router.keywords
     """
+    # 0. explicit task-class directive — highest priority
+    directive = task_class_directive(req.messages)
+    if directive:
+        return directive
+
     # 1. image
     if has_images(req.messages):
         return "vision"

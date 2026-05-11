@@ -868,11 +868,14 @@ async def chat(req: ChatRequest):
             scope_override=_scope_override, pref_override=_pref_override,
         )
         model_id = model_entry["id"]
+        _task_directive = router.task_class_directive(req.messages)
         routing_decision = {
             "task_class": task_class, "model": model_id, "strategy": strategy,
             "cloud_directive": _cloud_directive,
+            "task_directive": _task_directive,
         }
         log.info(f"[router] {strategy} → task_class='{task_class}' model='{model_id}'"
+                 + (f" [#{_task_directive}]" if _task_directive else "")
                  + (" [#cloud]" if _cloud_directive else ""))
 
         # OVH model selected — find matching proxy backend and forward
