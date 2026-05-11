@@ -456,6 +456,18 @@ async def set_scope(req: ScopeRequest) -> JSONResponse:
     return JSONResponse(status_code=200, content={"scope": req.scope})
 
 
+@app.post("/maintenance/restart")
+async def maintenance_restart() -> JSONResponse:
+    """Graceful self-restart. Sends SIGTERM after a short delay; systemd
+    Restart=always brings the server back up within ~15 seconds."""
+    import signal as _signal
+    log.info("Restart requested via /maintenance/restart — SIGTERM in 0.5s")
+    asyncio.get_event_loop().call_later(
+        0.5, lambda: os.kill(os.getpid(), _signal.SIGTERM)
+    )
+    return JSONResponse(status_code=200, content={"status": "restarting"})
+
+
 @app.get("/v1/models")
 async def list_models():
     scope = _cfg.get("provider_scope", "local")

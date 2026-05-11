@@ -23,11 +23,12 @@
   const vramPct      = $derived(vramTotalMib ? vramUsedMib / vramTotalMib * 100 : 0)
 
   function tempColor(t) {
-    return t == null ? 'inherit' : t < 70 ? 'var(--green)' : t < 85 ? 'var(--yellow)' : 'var(--red)'
+    return t == null ? 'var(--text)' : t < 70 ? 'var(--green)' : t < 85 ? 'var(--yellow)' : 'var(--red)'
   }
   function fanColor(rpm) {
-    return rpm == null ? 'inherit' : rpm < 1500 ? 'var(--green)' : rpm < 2500 ? 'var(--yellow)' : 'var(--red)'
+    return rpm == null ? 'var(--text)' : rpm < 1500 ? 'var(--green)' : rpm < 2500 ? 'var(--yellow)' : 'var(--red)'
   }
+  function na(v, fmt = v => v) { return v == null ? '—' : fmt(v) }
 </script>
 
 <section class="panel">
@@ -44,6 +45,8 @@
           </div>
         {/each}
       </div>
+    {:else}
+      <p class="dim hint">Engine % available after first inference</p>
     {/if}
 
     <div class="group">
@@ -57,27 +60,24 @@
       </div>
     </div>
 
-    <div class="group specs">
-      {#if gpu.temp_gt_c != null}
-        <div class="spec"><span class="label">GT temp</span>
-          <span style="color:{tempColor(gpu.temp_gt_c)}">{gpu.temp_gt_c} °C</span>
-        </div>
-      {/if}
-      {#if gpu.temp_mem_c != null}
-        <div class="spec"><span class="label">VRAM temp</span>
-          <span style="color:{tempColor(gpu.temp_mem_c)}">{gpu.temp_mem_c} °C</span>
-        </div>
-      {/if}
-      {#if gpu.fan_rpm != null}
-        <div class="spec"><span class="label">Fan</span>
-          <span style="color:{fanColor(gpu.fan_rpm)}">{gpu.fan_rpm} RPM</span>
-        </div>
-      {/if}
-      {#if gpu.power_w != null}
-        <div class="spec"><span class="label">Power</span>
-          <span>{gpu.power_w} W{gpu.power_cap_w ? ` / ${gpu.power_cap_w} W cap` : ''}</span>
-        </div>
-      {/if}
+    <!-- Fixed 2×2 grid so layout never shifts when fan/power data arrives -->
+    <div class="specs-grid">
+      <div class="spec">
+        <span class="slabel">GT temp</span>
+        <span style="color:{tempColor(gpu.temp_gt_c)}">{na(gpu.temp_gt_c, v => `${v} °C`)}</span>
+      </div>
+      <div class="spec">
+        <span class="slabel">VRAM temp</span>
+        <span style="color:{tempColor(gpu.temp_mem_c)}">{na(gpu.temp_mem_c, v => `${v} °C`)}</span>
+      </div>
+      <div class="spec">
+        <span class="slabel">Fan</span>
+        <span style="color:{fanColor(gpu.fan_rpm)}">{na(gpu.fan_rpm, v => `${v} RPM`)}</span>
+      </div>
+      <div class="spec">
+        <span class="slabel">Power</span>
+        <span>{na(gpu.power_w, v => `${v} W${gpu.power_cap_w ? ` / ${gpu.power_cap_w} W` : ''}`)}</span>
+      </div>
     </div>
   {/if}
 </section>
@@ -86,11 +86,17 @@
   .panel { padding: .75rem 1rem; height: 100%; }
   h2 { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; opacity: .45; margin-bottom: .6rem; }
   .dim { opacity: .35; font-size: .82rem; }
+  .hint { font-style: italic; margin-bottom: .5rem; }
   .group { margin-bottom: .6rem; }
   .row  { display: flex; align-items: center; gap: .5rem; margin-bottom: .2rem; font-size: .82rem; }
   .row.sub { opacity: .5; font-size: .75rem; }
   .label { width: 9rem; flex-shrink: 0; opacity: .5; font-size: .78rem; white-space: nowrap; }
-  .specs { display: grid; grid-template-columns: 1fr 1fr; gap: .2rem .5rem; }
-  .spec  { display: flex; flex-direction: column; font-size: .82rem; }
-  .spec .label { width: auto; font-size: .68rem; margin-bottom: .05rem; }
+  /* Fixed 2×2 grid — always occupies the same space regardless of null values */
+  .specs-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .4rem .5rem;
+  }
+  .spec { display: flex; flex-direction: column; font-size: .82rem; min-height: 2.4rem; }
+  .slabel { font-size: .68rem; opacity: .45; margin-bottom: .1rem; }
 </style>

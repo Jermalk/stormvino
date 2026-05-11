@@ -247,10 +247,15 @@ def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
         else:
             return _best_from(pool)
 
-    # Prefer models already in VRAM — avoid the eviction+load cost (minutes for
-    # large models). Only fall back to the full available list when none are loaded.
-    loaded_avail = [m for m in available if m["id"] in model_manager.loaded_models]
-    chosen = _pick(loaded_avail) or _pick(available)
+    # For "fastest" preference: prefer any already-loaded model to avoid eviction.
+    # For "balanced"/"best": always follow the tier hierarchy — loading a larger
+    # model is intentional and a loaded fast-tier model must not win over the
+    # best-tier model the profile is asking for.
+    if pref == "fastest":
+        loaded_avail = [m for m in available if m["id"] in model_manager.loaded_models]
+        chosen = _pick(loaded_avail) or _pick(available)
+    else:
+        chosen = _pick(available)
 
     if chosen is None:
         fallback_id = get_agent_model() or next(iter(AVAILABLE_MODELS), "")
