@@ -247,13 +247,16 @@ def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
         else:
             return _best_from(pool)
 
-    # For "fastest" preference: prefer any already-loaded model to avoid eviction.
-    # For "balanced"/"best": always follow the tier hierarchy — loading a larger
-    # model is intentional and a loaded fast-tier model must not win over the
-    # best-tier model the profile is asking for.
+    # For "fastest" preference: prefer an already-loaded fast-tier model to avoid
+    # eviction.  Restrict to fast-tier only — a loaded balanced/best model must
+    # not be returned just because it happens to be in memory; that would
+    # prevent the Fast profile from swapping back to qwen3-14b after Mistral
+    # was loaded by Precise/Laborious.
+    # For "balanced"/"best": always follow the tier hierarchy.
     if pref == "fastest":
-        loaded_avail = [m for m in available if m["id"] in model_manager.loaded_models]
-        chosen = _pick(loaded_avail) or _pick(available)
+        loaded_fast = [m for m in available
+                       if m["id"] in model_manager.loaded_models and m.get("tier") == "fast"]
+        chosen = _pick(loaded_fast) or _pick(available)
     else:
         chosen = _pick(available)
 

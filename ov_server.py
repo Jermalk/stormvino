@@ -264,8 +264,14 @@ async def _apply_profile(name: str) -> None:
                 f"max_models={_cfg['max_loaded_models']} routing={routing_default}"
                 + ("" if kv_changed else " (LLMs retained)")
             )
-            if get_agent_model():
-                asyncio.create_task(model_manager._warm_model(get_agent_model()))
+            # Proactively load the model this profile would route to for a
+            # general request — gives immediate feedback in the monitor instead
+            # of waiting for the first chat request.  With max_loaded_models=1
+            # the LRU eviction in _load_model handles the old model.
+            target = router._select_model("general", prof)
+            if target.get("provider", "loc") == "loc" and target["id"] in AVAILABLE_MODELS:
+                log.info(f"Profile '{name}' — preloading '{target['id']}'")
+                asyncio.create_task(model_manager._warm_model(target["id"]))
         except Exception as exc:
             log.error(f"Profile switch to '{name}' failed: {exc}")
         finally:
