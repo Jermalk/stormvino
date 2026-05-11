@@ -405,6 +405,7 @@ async def health():
         ),
         "assessor_kv_cache_size_gb": _cfg.get("assessor", {}).get("kv_cache_size_gb", 2),
         "active_profile":        _active_profile,
+        "profiles_config":       _cfg.get("profiles", {}),
         "profile_switching":     _profile_switching,
         "routing_backend":       _cfg.get("routing", {}).get("default", "local"),
         "provider_scope":        _cfg.get("provider_scope", "local"),

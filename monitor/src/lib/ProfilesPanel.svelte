@@ -3,17 +3,25 @@
 
   let { health } = $props()
 
-  // Descriptions reflect actual profile config — no KV (per-model, not per-profile)
   const PROFILES = [
-    { name: 'fast',      label: 'Fast',      pref: 'fastest',  think: false, maxtok: '2K' },
-    { name: 'precise',   label: 'Precise',   pref: 'balanced', think: true,  maxtok: '4K' },
-    { name: 'laborious', label: 'Laborious', pref: 'best',     think: true,  maxtok: '16K' },
+    { name: 'fast',      label: 'Fast'      },
+    { name: 'precise',   label: 'Precise'   },
+    { name: 'laborious', label: 'Laborious' },
   ]
   const SCOPES = ['local', 'local+ovh', 'all']
 
-  const active    = $derived(health?.active_profile    ?? '')
-  const switching = $derived(health?.profile_switching ?? false)
-  const scope     = $derived(health?.provider_scope    ?? 'local')
+  const active     = $derived(health?.active_profile    ?? '')
+  const switching  = $derived(health?.profile_switching ?? false)
+  const scope      = $derived(health?.provider_scope    ?? 'local')
+  const profCfg    = $derived(health?.profiles_config   ?? {})
+
+  function pref(name)   { return profCfg[name]?.model_preference ?? '—' }
+  function think(name)  { return profCfg[name]?.thinking ?? false }
+  function maxtok(name) {
+    const n = profCfg[name]?.max_new_tokens
+    if (!n) return '—'
+    return n >= 1000 ? `${Math.round(n / 1000)}K` : `${n}`
+  }
 
   let busy        = $state(false)
   let restarting  = $state(false)
@@ -64,7 +72,7 @@
         <div class="info">
           <span class="pname">{p.label}</span>
           <span class="pdesc">
-            {p.pref} · {p.think ? 'think' : 'no think'} · {p.maxtok} tok
+            {pref(p.name)} · {think(p.name) ? 'think' : 'no think'} · {maxtok(p.name)} tok
           </span>
         </div>
       </button>
