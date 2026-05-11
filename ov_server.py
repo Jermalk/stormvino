@@ -363,6 +363,13 @@ async def _startup_preload() -> None:
     if VISION_MODEL:
         log.info(f"Scheduling startup preload of VLM '{VISION_MODEL}'")
         asyncio.create_task(model_manager._warm_vlm(VISION_MODEL))
+    # Background VRAM profiler — measures any model not yet in DB, runs only at idle
+    asyncio.create_task(model_manager.run_background_profiler(
+        list(AVAILABLE_MODELS),
+        list(AVAILABLE_VLM_MODELS),
+        is_idle=lambda: stats.active_requests == 0,
+        resume_model_id=get_agent_model(),
+    ))
 
 
 @app.on_event("shutdown")
@@ -467,6 +474,28 @@ async def set_profile(req: ProfileRequest):
         raise HTTPException(status_code=409, detail="Profile switch already in progress")
     asyncio.create_task(_apply_profile(req.profile))
     return JSONResponse(status_code=202, content={"accepted": True, "profile": req.profile})
+
+
+@app.post("/admin/profile-models")
+async def admin_profile_models() -> JSONResponse:
+    """Trigger on-demand VRAM profiling of all available models.
+
+    Loads → measures → evicts each unmeasured model while the server is idle.
+    Returns 409 if a profiling run is already in progress.
+    """
+    if model_manager._profiler_running:
+        return JSONResponse(status_code=409, content={"status": "already_running"})
+    asyncio.create_task(model_manager.run_background_profiler(
+        list(AVAILABLE_MODELS),
+        list(AVAILABLE_VLM_MODELS),
+        is_idle=lambda: stats.active_requests == 0,
+        resume_model_id=get_agent_model(),
+    ))
+    return JSONResponse(status_code=202, content={
+        "status":  "started",
+        "models":  list(AVAILABLE_MODELS),
+        "vlms":    list(AVAILABLE_VLM_MODELS),
+    })
 
 
 @app.post("/admin/scope")

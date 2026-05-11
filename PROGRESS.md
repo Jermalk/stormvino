@@ -355,9 +355,9 @@
 
 ## NOW
 
-**Working on:** Profile routing + VLM coexistence — all profile switches now correct
-**Last commit:** 7937b0d — fix: tier-aware routing + VLM coexistence
-**Next action:** VRAM profiler Steps 3–8 still in plan (background profiler, /admin/profile-models endpoint) — or next user-directed task
+**Working on:** VRAM profiler Steps 4 + 8 — background profiler + /admin/profile-models
+**Last commit:** 8ed2987 — feat: #cloud directive + context-overflow routing to OVH
+**Next action:** Live-test /admin/profile-models + startup profiler log; or next user-directed task
 **Blocked on:** nothing
-**Open questions:** (1) Assessor GPU device. (2) InternVLAdapter tool calling deferred. (3) First Precise switch after cold restart evicts VLM (conservative — fixed after first load).
-**Tests:** profile cycle verified live: Fast=8b+VLM ✓, Precise=14b+VLM ✓, Laborious=Mistral ✓, Fast=8b+VLM ✓
+**Open questions:** (1) Assessor GPU device. (2) InternVLAdapter tool calling deferred.
+**Tests:** syntax checks pass; live test pending restart

@@ -488,6 +488,108 @@ async def _warm_vlm(model_id: str) -> None:
         log.warning(f"VLM preload failed for {model_id}: {exc}")
 
 
+# ---------------------------------------------------------------------------
+# Background VRAM profiler (Step 4)
+# ---------------------------------------------------------------------------
+_profiler_running: bool = False
+
+
+async def run_background_profiler(
+    llm_ids: list[str],
+    vlm_ids: list[str],
+    *,
+    is_idle: "callable[[], bool]",
+    resume_model_id: str | None = None,
+) -> None:
+    """Load → measure → evict each unmeasured model at idle.
+
+    Skips models already in _vram_measured (accurate data in hand).
+    Skips blocked models (config.blocked_models).
+    Waits up to 60s for idle between each model; aborts if never idle.
+    Reloads resume_model_id after finishing if any model was profiled.
+    """
+    global _profiler_running
+    if _profiler_running:
+        log.info("[profiler] already running — skipped")
+        return
+    _profiler_running = True
+
+    blocked: list[str] = _cfg.get("blocked_models", [])
+
+    async def _wait_idle(timeout_s: float = 60.0) -> bool:
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            if is_idle():
+                return True
+            await asyncio.sleep(2)
+        return False
+
+    profiled: list[str] = []
+
+    try:
+        for model_id in llm_ids:
+            if model_id in blocked:
+                continue
+            if model_id in _vram_measured:
+                log.info(f"[profiler] {model_id}: already measured ({_vram_measured[model_id]:.2f}GB) — skip")
+                continue
+            if not await _wait_idle():
+                log.warning(f"[profiler] server busy — aborting before {model_id}")
+                return
+
+            log.info(f"[profiler] measuring LLM '{model_id}'...")
+            try:
+                await get_model(model_id)
+                profiled.append(model_id)
+            except Exception as exc:
+                log.warning(f"[profiler] failed to load '{model_id}': {exc}")
+                continue
+
+            # Evict immediately — profiler must not pin models
+            async with _model_lock:
+                if model_id in loaded_models:
+                    del loaded_models[model_id]
+                    loaded_tokenizers.pop(model_id, None)
+                    model_last_used.pop(model_id, None)
+                    _vram_allocated.pop(model_id, None)
+                    gc.collect()
+
+        for vlm_id in vlm_ids:
+            if vlm_id in blocked:
+                continue
+            if vlm_id in _vram_measured:
+                log.info(f"[profiler] {vlm_id}: already measured ({_vram_measured[vlm_id]:.2f}GB) — skip")
+                continue
+            if not await _wait_idle():
+                log.warning(f"[profiler] server busy — aborting before {vlm_id}")
+                return
+
+            log.info(f"[profiler] measuring VLM '{vlm_id}'...")
+            try:
+                await get_vlm(vlm_id)
+                profiled.append(vlm_id)
+            except Exception as exc:
+                log.warning(f"[profiler] failed to load VLM '{vlm_id}': {exc}")
+                continue
+
+            async with _vlm_lock:
+                if vlm_id in loaded_vlm_models:
+                    del loaded_vlm_models[vlm_id]
+                    loaded_vlm_tokenizers.pop(vlm_id, None)
+                    model_last_used.pop(vlm_id, None)
+                    _vram_allocated.pop(vlm_id, None)
+                    gc.collect()
+
+        if profiled and resume_model_id:
+            log.info(f"[profiler] done — reloading resume model '{resume_model_id}'")
+            await _warm_model(resume_model_id)
+
+        log.info(f"[profiler] complete. Profiled: {profiled or 'none (all already measured)'}")
+
+    finally:
+        _profiler_running = False
+
+
 async def _load_assessor() -> None:
     """Load the assessor LLMPipeline as a background task after centroid computation.
 

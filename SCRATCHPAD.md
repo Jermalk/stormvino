@@ -4,13 +4,11 @@
 > Format: bullet points, max 5 lines per topic, no prose.
 
 ## Carried over:
-Session 35: Profile switching fully fixed. VRAM profiler plan at plans/20260511_PLAN_vram_profiler.md — 8 steps. Key VRAM data: qwen3-14b=14.87GB, mistral=18.96GB, total=22.71GB.
+Session 35+36: Profile switching + VLM coexistence fully fixed. OVH routing via #cloud/#ovh directive + context overflow cascade. VRAM profiler Steps 4+8 implemented.
 
-## VRAM profiler Steps 1+2 done + routing fix done:
-- DB: model_vram_profiles table; write_vram_profile + read_vram_profile
-- router.py: _balanced_from/best_from now tier-aware
-- config.json: qwen3-8b tier=fast, qwen3-14b tier=balanced, Mistral tier=best; agent_model=qwen3-8b
-- model_manager.py: can_coexist(); _vram_measured cache; lazy DB write on every load; _preload_vram_measurements at startup
-- ov_server.py: conditional VLM eviction; _warm_profile_models sequential LLM→VLM
-- Live VRAM: qwen3-8b=11.55, qwen3-14b=14.87, Mistral=18.96, VLM=4.81 (all in DB)
-- Profile cycle verified: Fast=8b+VLM, Precise=14b+VLM, Laborious=Mistral, Fast=8b+VLM
+## Steps 4+8 done:
+- model_manager.py: `_profiler_running` flag, `run_background_profiler(llm_ids, vlm_ids, *, is_idle, resume_model_id)`
+- Profiler: skips blocked + already-measured models; waits up to 60s for idle; evicts after each load; reloads resume_model after done
+- ov_server.py: `POST /admin/profile-models` → 409 if running, else 202 + starts task
+- _startup_preload: wires run_background_profiler as asyncio.create_task after VLM warm
+- Both files syntax-check clean; live test pending
