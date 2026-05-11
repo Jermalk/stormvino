@@ -433,8 +433,10 @@ async def get_vlm(model_id: str) -> Tuple[ov_genai.VLMPipeline, AutoTokenizer]:
                 _evict_lru()
                 free = vram_free_gb()
 
+        global _loading_model_id
         vlm_device = _cfg.get("vision_device", DEVICE)
         log.info(f"Loading VLM {model_id} (~{size:.1f}GB) on {vlm_device}...")
+        _loading_model_id = model_id
         try:
             loop = asyncio.get_running_loop()
             pipe = await loop.run_in_executor(
@@ -446,6 +448,7 @@ async def get_vlm(model_id: str) -> Tuple[ov_genai.VLMPipeline, AutoTokenizer]:
                 partial(AutoTokenizer.from_pretrained, AVAILABLE_VLM_MODELS[model_id],
                         trust_remote_code=True)
             )
+            _loading_model_id = None
             loaded_vlm_models[model_id] = pipe
             loaded_vlm_tokenizers[model_id] = tokenizer
             model_last_used[model_id] = time.time()
@@ -456,6 +459,7 @@ async def get_vlm(model_id: str) -> Tuple[ov_genai.VLMPipeline, AutoTokenizer]:
                      + (f", free: {free_after:.1f}GB" if free_after is not None else ""))
             db.write_vram_profile(model_id, 0.0, round(_vram_allocated[model_id], 2))
         except Exception as exc:
+            _loading_model_id = None
             log.error(f"Failed to load VLM {model_id}: {exc}")
             raise HTTPException(status_code=500, detail=str(exc))
 

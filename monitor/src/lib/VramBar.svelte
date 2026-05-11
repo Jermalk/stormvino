@@ -1,4 +1,6 @@
 <script>
+  import { onDestroy } from 'svelte'
+
   let { health } = $props()
 
   const COLORS = ['#4e9af1', '#9b6ef3', '#4ef1a0', '#f7c44e', '#f1544e']
@@ -23,13 +25,42 @@
     })
   })
 
-  const usedGb      = $derived(Object.values(health?.vram_allocated_gb ?? {}).reduce((s, v) => s + v, 0))
-  const totalGb     = $derived(health?.vram_total_gb ?? 0)
-  const freeGb      = $derived(Math.max(0, totalGb - usedGb))
-  const pct         = $derived(totalGb ? usedGb / totalGb * 100 : 0)
-  const over        = $derived(pct > 100)
-  const loadingId   = $derived(health?.loading_model_id ?? null)
-  const shortLoading = $derived(loadingId ? loadingId.replace(/-int4-ov|-int8-ov|-fp16-ov|-int4|-int8/g, '') : null)
+  const usedGb   = $derived(Object.values(health?.vram_allocated_gb ?? {}).reduce((s, v) => s + v, 0))
+  const totalGb  = $derived(health?.vram_total_gb ?? 0)
+  const freeGb   = $derived(Math.max(0, totalGb - usedGb))
+  const pct      = $derived(totalGb ? usedGb / totalGb * 100 : 0)
+  const over     = $derived(pct > 100)
+  const loadingId    = $derived(health?.loading_model_id ?? null)
+  const isSwitching  = $derived(health?.profile_switching ?? false)
+
+  // Sticky display: keep showing the last known loading model for 3s after it clears.
+  // Also triggers on profile_switching=true even before loadingId is set.
+  // stickyActive: true while switching/loading OR during the 3s hold-after.
+  // stickyId: the last model name seen (null = no name yet → show "Switching…").
+  let stickyActive = $state(false)
+  let stickyId     = $state(null)
+  let stickyTimer  = null
+
+  $effect(() => {
+    const active = loadingId || isSwitching
+    if (active) {
+      clearTimeout(stickyTimer)
+      stickyTimer  = null
+      stickyActive = true
+      if (loadingId) stickyId = loadingId  // preserve last known name while isSwitching
+    } else if (stickyActive) {
+      if (!stickyTimer) {
+        stickyTimer = setTimeout(() => { stickyActive = false; stickyId = null; stickyTimer = null }, 3000)
+      }
+    }
+  })
+
+  onDestroy(() => clearTimeout(stickyTimer))
+
+  const shortSticky = $derived(
+    stickyId ? stickyId.replace(/-int4-ov|-int8-ov|-fp16-ov|-int4|-int8/g, '') : null
+  )
+  const showLoading = $derived(stickyActive || isSwitching)
 </script>
 
 <section class="vram-section">
@@ -46,8 +77,8 @@
         <div class="seg kv" style="width:{s.kPct}%; background:{s.color}66" title="{s.id} KV {s.kvSegGb.toFixed(1)}GB"></div>
       {/if}
     {/each}
-    {#if loadingId}
-      <div class="seg loading-seg" style="flex:1" title="Loading {loadingId}…">
+    {#if showLoading}
+      <div class="seg loading-seg" style="flex:1" title="Loading {stickyId ?? '…'}">
         <div class="load-shimmer"></div>
       </div>
     {:else}
@@ -65,10 +96,10 @@
         </span>
       </span>
     {/each}
-    {#if loadingId}
+    {#if showLoading}
       <span class="leg-item loading-item">
         <span class="dot loading-dot"></span>
-        <span class="leg-label">Loading {shortLoading}…</span>
+        <span class="leg-label">{shortSticky ? `Loading ${shortSticky}…` : 'Switching…'}</span>
       </span>
     {:else}
       <span class="leg-item">
