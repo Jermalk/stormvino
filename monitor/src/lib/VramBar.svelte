@@ -23,11 +23,13 @@
     })
   })
 
-  const usedGb  = $derived(Object.values(health?.vram_allocated_gb ?? {}).reduce((s, v) => s + v, 0))
-  const totalGb = $derived(health?.vram_total_gb ?? 0)
-  const freeGb  = $derived(Math.max(0, totalGb - usedGb))
-  const pct     = $derived(totalGb ? usedGb / totalGb * 100 : 0)
-  const over    = $derived(pct > 100)
+  const usedGb      = $derived(Object.values(health?.vram_allocated_gb ?? {}).reduce((s, v) => s + v, 0))
+  const totalGb     = $derived(health?.vram_total_gb ?? 0)
+  const freeGb      = $derived(Math.max(0, totalGb - usedGb))
+  const pct         = $derived(totalGb ? usedGb / totalGb * 100 : 0)
+  const over        = $derived(pct > 100)
+  const loadingId   = $derived(health?.loading_model_id ?? null)
+  const shortLoading = $derived(loadingId ? loadingId.replace(/-int4-ov|-int8-ov|-fp16-ov|-int4|-int8/g, '') : null)
 </script>
 
 <section class="vram-section">
@@ -44,7 +46,13 @@
         <div class="seg kv" style="width:{s.kPct}%; background:{s.color}66" title="{s.id} KV {s.kvSegGb.toFixed(1)}GB"></div>
       {/if}
     {/each}
-    <div class="seg free" style="flex:1" title="free {freeGb.toFixed(1)}GB"></div>
+    {#if loadingId}
+      <div class="seg loading-seg" style="flex:1" title="Loading {loadingId}…">
+        <div class="load-shimmer"></div>
+      </div>
+    {:else}
+      <div class="seg free" style="flex:1" title="free {freeGb.toFixed(1)}GB"></div>
+    {/if}
   </div>
 
   <div class="legend">
@@ -57,11 +65,18 @@
         </span>
       </span>
     {/each}
-    <span class="leg-item">
-      <span class="dot free-dot"></span>
-      <span class="leg-label">free</span>
-      <span class="leg-detail">{freeGb.toFixed(1)}GB</span>
-    </span>
+    {#if loadingId}
+      <span class="leg-item loading-item">
+        <span class="dot loading-dot"></span>
+        <span class="leg-label">Loading {shortLoading}…</span>
+      </span>
+    {:else}
+      <span class="leg-item">
+        <span class="dot free-dot"></span>
+        <span class="leg-label">free</span>
+        <span class="leg-detail">{freeGb.toFixed(1)}GB</span>
+      </span>
+    {/if}
   </div>
 </section>
 
@@ -75,10 +90,27 @@
   .bar-track { height: 14px; background: #ffffff0e; border-radius: 7px; overflow: hidden; display: flex; }
   .seg { height: 100%; transition: width .4s; }
   .free { background: transparent; }
-  .legend { display: flex; flex-wrap: wrap; gap: .3rem .8rem; margin-top: .4rem; }
-  .leg-item { display: flex; align-items: center; gap: .25rem; font-size: .72rem; }
-  .dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+
+  .loading-seg { position: relative; overflow: hidden; }
+  .load-shimmer {
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(90deg, transparent 0%, #f7c44e22 40%, #f7c44e44 50%, #f7c44e22 60%, transparent 100%);
+    background-size: 200% 100%;
+    animation: vram-shimmer 1.4s ease-in-out infinite;
+  }
+  @keyframes vram-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .legend { display: flex; flex-wrap: wrap; gap: .35rem .9rem; margin-top: .5rem; }
+  .leg-item { display: flex; align-items: center; gap: .3rem; font-size: .82rem; }
+  .dot { width: 9px; height: 9px; border-radius: 2px; flex-shrink: 0; }
   .free-dot { background: #ffffff20; }
-  .leg-label { opacity: .7; }
-  .leg-detail { opacity: .45; font-size: .68rem; }
+  .leg-label { opacity: .8; }
+  .leg-detail { opacity: .5; font-size: .76rem; }
+
+  .loading-item .leg-label { color: var(--yellow); opacity: 1; animation: leg-pulse 1.4s ease-in-out infinite; }
+  .loading-dot { background: var(--yellow); }
+  @keyframes leg-pulse { 0%,100% { opacity:.6 } 50% { opacity:1 } }
 </style>

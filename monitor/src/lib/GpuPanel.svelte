@@ -12,12 +12,6 @@
     bcs:  'Blitter (bcs)',
   }
 
-  const engines = $derived(
-    Object.entries(ENGINE_LABELS)
-      .filter(([k]) => k in (gpu.engine_pct ?? {}))
-      .map(([k, label]) => ({ key: k, label, pct: gpu.engine_pct[k] }))
-  )
-
   const vramUsedMib  = $derived(gpu.vram_used_mib  ?? 0)
   const vramTotalMib = $derived(gpu.vram_total_mib ?? 24480)
   const vramPct      = $derived(vramTotalMib ? vramUsedMib / vramTotalMib * 100 : 0)
@@ -36,18 +30,14 @@
   {#if !sys}
     <p class="dim">waiting…</p>
   {:else}
-    {#if engines.length}
-      <div class="group">
-        {#each engines as e}
-          <div class="row">
-            <span class="label">{e.label}</span>
-            <BarMeter pct={e.pct} />
-          </div>
-        {/each}
-      </div>
-    {:else}
-      <p class="dim hint">Engine % available after first inference</p>
-    {/if}
+    <div class="group">
+      {#each Object.entries(ENGINE_LABELS) as [k, label]}
+        <div class="row">
+          <span class="label">{label}</span>
+          <BarMeter pct={gpu.engine_pct?.[k] ?? 0} />
+        </div>
+      {/each}
+    </div>
 
     <div class="group">
       <div class="row">
@@ -86,7 +76,6 @@
   .panel { padding: .75rem 1rem; height: 100%; }
   h2 { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; opacity: .45; margin-bottom: .6rem; }
   .dim { opacity: .35; font-size: .82rem; }
-  .hint { font-style: italic; margin-bottom: .5rem; }
   .group { margin-bottom: .6rem; }
   .row  { display: flex; align-items: center; gap: .5rem; margin-bottom: .2rem; font-size: .82rem; }
   .row.sub { opacity: .5; font-size: .75rem; }

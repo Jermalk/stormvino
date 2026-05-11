@@ -72,6 +72,6 @@
     height: 28px; margin: .3rem 0 .3rem 7.5rem;
     background: #ffffff08; border-radius: 3px; padding: 2px; overflow: hidden;
   }
-  .core-cell { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+  .core-cell { flex: 0 0 7px; height: 100%; display: flex; align-items: flex-end; }
   .core-bar  { width: 100%; border-radius: 1px; min-height: 2px; transition: height .4s; }
 </style>

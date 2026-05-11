@@ -60,37 +60,25 @@
 
   <!-- Row 2: Server (40%) · Arc B60 (30%) · Profiles (30%) -->
   <div class="row tri">
-    <div class="cell wide border-right">
-      <ServerPanel {health} />
-    </div>
-    <div class="cell mid border-right">
-      <GpuPanel {sys} />
-    </div>
-    <div class="cell mid">
-      <ProfilesPanel {health} />
-    </div>
+    <div class="cell"><ServerPanel {health} /></div>
+    <div class="cell"><GpuPanel {sys} /></div>
+    <div class="cell"><ProfilesPanel {health} /></div>
   </div>
 
   <!-- Row 3: CPU + Memory (40%) · VRAM Profiler (30%) · Model usage (30%) -->
-  <div class="row tri border-top">
-    <div class="cell wide border-right">
-      <SystemPanel {sys} />
-    </div>
-    <div class="cell mid border-right">
-      <ProfilerPanel {profiler} />
-    </div>
-    <div class="cell mid">
-      <ModelUsage />
-    </div>
+  <div class="row tri">
+    <div class="cell"><SystemPanel {sys} /></div>
+    <div class="cell"><ProfilerPanel {profiler} /></div>
+    <div class="cell"><ModelUsage /></div>
   </div>
 
   <!-- Row 4: Model catalogue (100%) -->
-  <div class="row full border-top">
+  <div class="row full">
     <CataloguePanel {profiler} />
   </div>
 
   <!-- Row 5: History chart (100%) -->
-  <div class="row full border-top">
+  <div class="row full">
     <Charts />
   </div>
 </div>
@@ -128,23 +116,21 @@
   .clock     { margin-left: auto; opacity: .35; font-size: .75rem; font-variant-numeric: tabular-nums; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
 
-  .vram-row { border-bottom: 1px solid var(--border); background: var(--card); }
+  .vram-row { background: var(--card); }
 
-  /* Rows */
-  .row { display: grid; min-width: 0; }
-  .tri  { grid-template-columns: 4fr 3fr 3fr; }   /* 40 · 30 · 30 */
+  /* Rows: border-top separates every row from the one above */
+  .row { display: grid; min-width: 0; border-top: 1px solid var(--border); }
+  .tri  { grid-template-columns: 4fr 3fr 3fr; }
   .full { background: var(--card); }
 
-  /* Cells */
-  .cell       { background: var(--bg); min-width: 0; overflow: hidden; }
-  .wide       { /* 40% col — no extra class needed */ }
-  .mid        { /* 30% col — no extra class needed */ }
-  .border-right { border-right: 1px solid var(--border); }
-  .border-top   { border-top:   1px solid var(--border); }
+  /* Cells: right border on all but the last in a row */
+  .cell { background: var(--bg); min-width: 0; overflow: hidden; border-right: 1px solid var(--border); }
+  .cell:last-child { border-right: none; }
 
   /* Responsive: collapse to 1 column below 900px */
   @media (max-width: 900px) {
     .tri { grid-template-columns: 1fr; }
-    .border-right { border-right: none; border-bottom: 1px solid var(--border); }
+    .cell { border-right: none; border-bottom: 1px solid var(--border); }
+    .cell:last-child { border-bottom: none; }
   }
 </style>
