@@ -116,6 +116,18 @@ SELECT DISTINCT ON (task_class)
 FROM routing_centroids
 ORDER BY task_class, ts DESC;
 
+-- ── 5. model_vram_profiles ────────────────────────────────────────────────────
+-- Measured VRAM footprint per (model_id, kv_cache_gb). Created at runtime via
+-- db._ensure_schema() — this DDL is provided for reference only.
+CREATE TABLE IF NOT EXISTS model_vram_profiles (
+    model_id        TEXT        NOT NULL,
+    kv_cache_gb     REAL        NOT NULL,
+    vram_gb         REAL        NOT NULL,
+    load_time_s     REAL,
+    measured_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (model_id, kv_cache_gb)
+);
+
 -- ── Retention policy (run as cron or pg_cron) ─────────────────────────────────
 -- DELETE FROM inference_events  WHERE ts < now() - INTERVAL '30 days';
 -- DELETE FROM system_snapshots  WHERE ts < now() - INTERVAL '30 days';

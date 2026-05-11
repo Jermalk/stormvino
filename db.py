@@ -30,6 +30,28 @@ async def _init_conn(conn) -> None:
     await register_vector(conn)
 
 
+async def _ensure_schema() -> None:
+    """Create tables that are managed in-process (idempotent, safe to re-run)."""
+    if _pool is None:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS model_vram_profiles (
+                    model_id        TEXT    NOT NULL,
+                    kv_cache_gb     REAL    NOT NULL,
+                    vram_gb         REAL    NOT NULL,
+                    load_time_s     REAL,
+                    measured_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (model_id, kv_cache_gb)
+                )
+                """
+            )
+    except Exception as exc:
+        log.warning(f"DB _ensure_schema failed: {exc}")
+
+
 async def init_pool(dsn: str | None) -> None:
     """Open connection pool. Noop if dsn is None."""
     global _pool
@@ -40,6 +62,7 @@ async def init_pool(dsn: str | None) -> None:
         import asyncpg
         _pool = await asyncpg.create_pool(dsn, min_size=1, max_size=4, init=_init_conn)
         log.info(f"Observability DB connected: {dsn}")
+        await _ensure_schema()
     except Exception as exc:
         log.warning(f"Observability DB unavailable — inference unaffected: {exc}")
         _pool = None
@@ -182,6 +205,31 @@ async def _write_system_snapshot(
         log.warning(f"DB write_system_snapshot failed: {exc}")
 
 
+async def _write_vram_profile_impl(
+    model_id: str,
+    kv_cache_gb: float,
+    vram_gb: float,
+    load_time_s: float | None,
+) -> None:
+    if _pool is None:
+        return
+    try:
+        async with _pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO model_vram_profiles (model_id, kv_cache_gb, vram_gb, load_time_s, measured_at)
+                VALUES ($1, $2, $3, $4, now())
+                ON CONFLICT (model_id, kv_cache_gb)
+                DO UPDATE SET vram_gb = EXCLUDED.vram_gb,
+                              load_time_s = EXCLUDED.load_time_s,
+                              measured_at = EXCLUDED.measured_at
+                """,
+                model_id, kv_cache_gb, vram_gb, load_time_s,
+            )
+    except Exception as exc:
+        log.warning(f"DB write_vram_profile failed: {exc}")
+
+
 # ── public fire-and-forget API ────────────────────────────────────────────────
 
 def write_inference_event(**kwargs: Any) -> None:
@@ -200,7 +248,32 @@ def write_system_snapshot(**kwargs: Any) -> None:
     _bg(_write_system_snapshot(**kwargs))
 
 
-# ── query API (used by /metrics endpoints) ────────────────────────────────────
+def write_vram_profile(
+    model_id: str,
+    kv_cache_gb: float,
+    vram_gb: float,
+    load_time_s: float | None = None,
+) -> None:
+    _bg(_write_vram_profile_impl(model_id, kv_cache_gb, vram_gb, load_time_s))
+
+
+# ── query API (used by /metrics endpoints and VRAM profiler) ──────────────────
+
+
+async def read_vram_profile(model_id: str, kv_cache_gb: float) -> float | None:
+    """Return measured vram_gb for (model_id, kv_cache_gb), or None if unmeasured."""
+    if _pool is None:
+        return None
+    try:
+        async with _pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT vram_gb FROM model_vram_profiles WHERE model_id=$1 AND kv_cache_gb=$2",
+                model_id, kv_cache_gb,
+            )
+        return float(row["vram_gb"]) if row else None
+    except Exception as exc:
+        log.warning(f"DB read_vram_profile failed: {exc}")
+        return None
 
 async def query_events(
     limit: int = 100,

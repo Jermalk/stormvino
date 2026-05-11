@@ -208,6 +208,13 @@ def _record_stats(model_id: str, completion_tokens: int,
 
 
 
+async def _warm_profile_models(llm_id: str, vlm_id: str | None) -> None:
+    """Load target LLM then optionally VLM — sequential to avoid VRAM races."""
+    await model_manager._warm_model(llm_id)
+    if vlm_id and vlm_id not in model_manager.loaded_vlm_models:
+        await model_manager._warm_vlm(vlm_id)
+
+
 async def _apply_profile(name: str) -> None:
     """Evict all LLMs, apply profile settings, then preload the agent model."""
     global _active_profile, _profile_switching
@@ -230,8 +237,22 @@ async def _apply_profile(name: str) -> None:
             new_kv     = prof.get("kv_cache_size_gb", _cfg["kv_cache_size_gb"])
             kv_changed = new_kv != _cfg.get("kv_cache_size_gb")
 
-            # VLMs are always evicted — loaded on-demand, not profile-specific
-            await model_manager.evict_all_vlms()
+            # Determine target LLM first — needed for coexistence check.
+            target = router._select_model("general", prof)
+            target_llm = target["id"]
+            primary_vlm = VISION_MODEL
+
+            # Keep VLM in memory if target LLM + VLM fit; evict otherwise.
+            vlm_can_stay = (
+                bool(primary_vlm)
+                and target.get("provider", "loc") == "loc"
+                and model_manager.can_coexist(target_llm, primary_vlm)
+            )
+            if not vlm_can_stay:
+                await model_manager.evict_all_vlms()
+                log.info(f"Profile '{name}': VLM evicted — '{target_llm}' + '{primary_vlm}' exceed VRAM budget")
+            else:
+                log.info(f"Profile '{name}': VLM retained — '{target_llm}' + '{primary_vlm}' fit in VRAM")
 
             # LLMs: evict only when KV budget changes — it is baked into LLMPipeline
             # at construction time and cannot be changed on a live pipeline.
@@ -264,14 +285,11 @@ async def _apply_profile(name: str) -> None:
                 f"max_models={_cfg['max_loaded_models']} routing={routing_default}"
                 + ("" if kv_changed else " (LLMs retained)")
             )
-            # Proactively load the model this profile would route to for a
-            # general request — gives immediate feedback in the monitor instead
-            # of waiting for the first chat request.  With max_loaded_models=1
-            # the LRU eviction in _load_model handles the old model.
-            target = router._select_model("general", prof)
-            if target.get("provider", "loc") == "loc" and target["id"] in AVAILABLE_MODELS:
-                log.info(f"Profile '{name}' — preloading '{target['id']}'")
-                asyncio.create_task(model_manager._warm_model(target["id"]))
+            # Proactively load target LLM (and VLM if it coexists) — gives
+            # immediate feedback in the monitor rather than waiting for first chat.
+            if target.get("provider", "loc") == "loc" and target_llm in AVAILABLE_MODELS:
+                log.info(f"Profile '{name}' — preloading '{target_llm}'")
+                asyncio.create_task(_warm_profile_models(target_llm, primary_vlm if vlm_can_stay else None))
         except Exception as exc:
             log.error(f"Profile switch to '{name}' failed: {exc}")
         finally:
@@ -334,6 +352,7 @@ class ScopeRequest(BaseModel):
 async def _startup_preload() -> None:
     await db.init_pool(_cfg.get("postgres_dsn"))
     await db.prune_old_events(days=30)
+    await model_manager._preload_vram_measurements()    # warm _vram_measured from DB
     await router._load_embedding_centroids()    # blocking — centroids before assessor
     asyncio.create_task(model_manager._load_assessor())       # background — assessor pipeline
     asyncio.create_task(_system_snapshot_loop())

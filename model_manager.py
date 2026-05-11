@@ -49,7 +49,8 @@ loaded_vlm_tokenizers: Dict[str, AutoTokenizer] = {}
 # VRAM tracking — total queried once at startup; per-model allocation maintained internally.
 # Using internal accounting because a fresh ov.Core() sees zero allocations from other instances.
 _TOTAL_VRAM_GB: Optional[float] = None
-_vram_allocated: Dict[str, float] = {}   # model_id → estimated GB on GPU
+_vram_allocated: Dict[str, float] = {}   # model_id → GB currently on GPU (cleared on eviction)
+_vram_measured: Dict[str, float] = {}    # model_id → GB at last load (persists across evictions)
 _vlm_lock = asyncio.Lock()
 
 _vlm_infer_locks: Dict[str, asyncio.Lock] = {}
@@ -131,6 +132,32 @@ def _init_vram() -> None:
 
 
 _init_vram()   # populate _TOTAL_VRAM_GB at import time (quick property query, no model load)
+
+
+VRAM_COEXIST_HEADROOM_GB: float = 1.5
+# Conservative multiplier for unmeasured models. Actual overhead is ~1.88 for int4,
+# but 2.2 gives a safety margin when measurements are not yet available.
+VRAM_ESTIMATE_FACTOR: float = 2.2
+
+
+def _vram_footprint_gb(model_id: str) -> float:
+    """Best available VRAM estimate. Priority: live → last measured → disk × factor."""
+    return (
+        _vram_allocated.get(model_id)
+        or _vram_measured.get(model_id)
+        or model_size_gb(model_id) * VRAM_ESTIMATE_FACTOR
+    )
+
+
+def can_coexist(llm_id: str, vlm_id: str) -> bool:
+    """True if llm + vlm fit in VRAM simultaneously (with headroom).
+    Falls back to disk-size × VRAM_ESTIMATE_FACTOR when unmeasured (conservative).
+    Accuracy improves once VRAM profiler Step 2 populates _vram_allocated with measurements."""
+    if _TOTAL_VRAM_GB is None:
+        return False
+    return (
+        _vram_footprint_gb(llm_id) + _vram_footprint_gb(vlm_id) + VRAM_COEXIST_HEADROOM_GB
+    ) <= _TOTAL_VRAM_GB
 
 
 def vram_free_gb() -> Optional[float]:
@@ -331,6 +358,7 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
         loaded_tokenizers[model_id] = tokenizer
         model_last_used[model_id] = time.time()
         _vram_allocated[model_id] = weights_gb + kv_gb
+        _vram_measured[model_id] = _vram_allocated[model_id]
         free_after = vram_free_gb()
         log.info(f"Loaded {model_id} | VRAM allocated: {_vram_allocated[model_id]:.1f}GB"
                  + (f", free: {free_after:.1f}GB" if free_after is not None else ""))
@@ -341,6 +369,7 @@ async def get_model(model_id: str) -> ov_genai.LLMPipeline:
             vram_after_gb=free_after, elapsed_sec=None,
             meta={"weights_gb": round(weights_gb, 2)},
         )
+        db.write_vram_profile(model_id, float(kv_gb), round(_vram_allocated[model_id], 2))
     return loaded_models[model_id]
 
 
@@ -417,14 +446,28 @@ async def get_vlm(model_id: str) -> Tuple[ov_genai.VLMPipeline, AutoTokenizer]:
             loaded_vlm_tokenizers[model_id] = tokenizer
             model_last_used[model_id] = time.time()
             _vram_allocated[model_id] = model_size_gb(model_id)
+            _vram_measured[model_id] = _vram_allocated[model_id]
             free_after = vram_free_gb()
             log.info(f"Loaded VLM {model_id} | VRAM allocated: {_vram_allocated[model_id]:.1f}GB"
                      + (f", free: {free_after:.1f}GB" if free_after is not None else ""))
+            db.write_vram_profile(model_id, 0.0, round(_vram_allocated[model_id], 2))
         except Exception as exc:
             log.error(f"Failed to load VLM {model_id}: {exc}")
             raise HTTPException(status_code=500, detail=str(exc))
 
     return loaded_vlm_models[model_id], loaded_vlm_tokenizers[model_id]
+
+
+async def _preload_vram_measurements() -> None:
+    """Populate _vram_measured from DB at startup so can_coexist() uses accurate values
+    even for models not yet loaded this session."""
+    all_model_ids = list(AVAILABLE_MODELS) + list(AVAILABLE_VLM_MODELS)
+    for model_id in all_model_ids:
+        kv = float(_model_kv_gb(model_id)) if model_id in AVAILABLE_MODELS else 0.0
+        measured = await db.read_vram_profile(model_id, kv)
+        if measured is not None:
+            _vram_measured[model_id] = measured
+            log.info(f"[vram-cache] {model_id}: {measured:.2f} GB (from DB)")
 
 
 async def _warm_model(model_id: str) -> None:

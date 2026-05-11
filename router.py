@@ -233,10 +233,16 @@ def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
         return next((m for m in pool if m.get("tier") == "fast" and m.get("provider") == "loc"), None)
 
     def _balanced_from(pool: list[dict]) -> dict | None:
+        loc_balanced = [m for m in pool if m.get("provider") == "loc" and m.get("tier") == "balanced"]
+        if loc_balanced:
+            return loc_balanced[-1]
         loc = [m for m in pool if m.get("provider") == "loc"]
         return loc[-1] if loc else None
 
     def _best_from(pool: list[dict]) -> dict | None:
+        best = [m for m in pool if m.get("tier") == "best"]
+        if best:
+            return best[-1]
         return pool[-1] if pool else None
 
     def _pick(pool: list[dict]) -> dict | None:

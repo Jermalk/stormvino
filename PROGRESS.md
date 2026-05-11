@@ -355,9 +355,9 @@
 
 ## NOW
 
-**Working on:** VRAM profiler + VLM coexistence — plan written, ready to implement
+**Working on:** VRAM profiler — Step 1 done (DB table + write/read functions)
 **Last commit:** e192bc9 — feat: live profile config in health + dynamic ProfilesPanel descriptions
-**Next action:** VRAM profiler Step 1 — `model_vram_profiles` table in `db.py` (plan: plans/20260511_PLAN_vram_profiler.md)
+**Next action:** VRAM profiler Step 2 — lazy measurement in `_load_model` and `_load_vlm` in `model_manager.py`
 **Blocked on:** nothing
-**Open questions:** (1) VLM VRAM footprint — answered by Step 2. (2) Assessor GPU device. (3) InternVLAdapter deferred.
-**Tests:** profile switching verified; 176/176 unit tests pass
+**Open questions:** (1) VLM VRAM footprint — answered by Step 2 measurement. (2) Assessor GPU device. (3) InternVLAdapter deferred.
+**Tests:** Step 1 round-trip verified (write + read via psql); 176/176 unit tests not re-run yet
