@@ -735,13 +735,27 @@ async def _proxy_chat(req: ChatRequest, spec: dict) -> Union[StreamingResponse, 
                         "POST", f"{base_url}/chat/completions",
                         json=body, headers=headers,
                     ) as resp:
-                        resp.raise_for_status()
+                        if resp.status_code >= 400:
+                            # Read body before closing the stream so we can log it.
+                            # raise_for_status() inside client.stream() leaves the
+                            # response unread, making exc.response.text crash.
+                            await resp.aread()
+                            log.error(
+                                f"[proxy] upstream error {resp.status_code}: "
+                                f"{resp.text[:300]}"
+                            )
+                            yield (
+                                f'data: {{"error":"upstream error",'
+                                f'"status":{resp.status_code}}}\n\n'
+                            )
+                            yield "data: [DONE]\n\n"
+                            return
                         async for line in resp.aiter_lines():
                             if line:
                                 yield f"{line}\n\n"
-            except httpx.HTTPStatusError as exc:
-                log.error(f"[proxy] upstream error {exc.response.status_code}: {exc.response.text[:200]}")
-                raise HTTPException(status_code=502, detail="Upstream backend error")
+            except Exception as exc:
+                log.error(f"[proxy] upstream exception: {exc}")
+                yield "data: [DONE]\n\n"
             finally:
                 stats.active_requests -= 1
 
