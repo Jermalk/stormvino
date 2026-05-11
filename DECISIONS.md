@@ -383,3 +383,35 @@
 **Rationale:** InternVL's jinja template does `message['role'] + '\n' + message['content']` — a list content causes TypeError. Qwen2.5-VL's template handles typed dicts natively. Detection by checking for `message['content']` or `message["content"]` in the template string.
 **Rejected alternative:** Patch InternVL's chat_template.jinja — modifying exported model files is fragile.
 **Affects:** prompt_builder.py `build_vlm_prompt()`, `_vlm_content()`
+
+---
+
+### 2026-05-11 — qwen3-coder-30b-a3b-int4-ov as local "best" tier for code tasks
+**Decision:** Add `qwen3-coder-30b-a3b-int4-ov` as `tier: "best"` local model in the code task class; move `mistral-small-3.2-24b-int4-ov` from "best" to "balanced".
+**Rationale:** qwen3-coder-30b (3B active params MoE) fits in VRAM and produced clearly superior code output in live testing. Mistral-24b is a solid Precise-profile choice as balanced. Laborious profile (local best) now routes to a dedicated code model instead of a general-purpose one.
+**Rejected alternative:** Keep Mistral as best — qwen3-coder-30b empirically outperformed it on code tasks while fitting the same VRAM budget.
+**Affects:** config.json code task class
+
+### 2026-05-11 — max_loaded_models raised from 1 to 2
+**Decision:** Set `max_loaded_models: 2` (was 1).
+**Rationale:** With qwen3-coder-30b as a local model and the profile system routing across fast/balanced/best tiers, keeping two LLMs warm reduces reload latency when switching between code and general tasks. VRAM budget: qwen3-8b (5GB) + qwen3-14b (9GB) + KV per model is within the 22.71GB total with 1.5GB headroom.
+**Rejected alternative:** Keep max_loaded_models=1 — simpler but incurs 15-30s reload on every profile switch.
+**Affects:** config.json
+
+### 2026-05-11 — embedding_device moved from GPU.0 to GPU.1
+**Decision:** Set `embedding_device: "GPU.1"` (was "GPU.0").
+**Rationale:** GPU.0 is the Arc B50 (16GB); GPU.1 is the Arc B60 (22.71GB). Embedding model (multilingual-e5-large, ~1.1GB) consolidates all inference on the larger GPU, freeing GPU.0 for other uses. No throughput penalty — embedding inference is not the bottleneck.
+**Rejected alternative:** Keep GPU.0 — would have been correct if keeping GPU.0 for dedicated embedding, but there are no other GPU.0 workloads currently.
+**Affects:** config.json
+
+### 2026-05-11 — phi-4-int4-ov removed from blocked_models
+**Decision:** Clear `blocked_models` (removed phi-4-int4-ov).
+**Rationale:** phi-4 was blocked after qwen3-14b became the preferred balanced model. With the routing system now selecting models by task class and tier, phi-4 is no longer routed by default — blocking is unnecessary. Keeping it available for explicit model selection.
+**Rejected alternative:** Keep blocked — prevents explicit use of phi-4 which may be desired for comparison testing.
+**Affects:** config.json
+
+### 2026-05-11 — OVH proxy streaming: explicit status check + aread() before error log
+**Decision:** Replace `resp.raise_for_status()` inside `client.stream()` with explicit `if resp.status_code >= 400: await resp.aread()` check; yield SSE error event instead of raising HTTPException.
+**Rationale:** `raise_for_status()` inside `client.stream()` leaves the response body unread; accessing `.text` on the raised exception triggers `ResponseNotRead`. Explicit `aread()` drains the body cleanly. Yielding an SSE error event prevents the generator from throwing inside StreamingResponse (which logs an unhandled exception after headers are sent).
+**Rejected alternative:** Wrap raise_for_status() in try/except ResponseNotRead — treats a design issue as an exception; harder to read.
+**Affects:** ov_server.py OVH proxy `stream_gen()` function

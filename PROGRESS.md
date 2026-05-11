@@ -353,11 +353,31 @@
 
 ---
 
+### 2026-05-11 — Session 36 (85de6e5)
+**Working on:** VRAM profiler (Steps 4+8) + SVP ProfilerPanel + SVP Phase 2 (charts + model usage)
+**Last commit:** 85de6e5 — docs: session wrap — SVP Phase 2 complete, Phase 3 next
+**Next action:** SVP Phase 3 — model catalogue panel + routing decision detail
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Assessor GPU.0 vs GPU.1.
+**Tests:** build clean (683ms, 119KB JS); profiler endpoint live
+
+---
+
+### 2026-05-11 — Session 37 (986cf46)
+**Working on:** SVP layout redesign + OVH proxy crash fix + qwen3-coder-30b routing
+**Last commit:** 986cf46 — feat: qwen3-coder-30b-a3b-int4-ov as best local code model; Mistral→balanced
+**Next action:** SVP Phase 3 — catalogue panel + routing detail (plans/20260511_PLAN_svp.md § Phase 3)
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
+**Tests:** server /health OK; SVP build clean
+
+---
+
 ## NOW
 
-**Working on:** SVP Phase 2 complete — live charts + model usage
-**Last commit:** e7f488e — feat: SVP Phase 2 — live Postgres charts + model usage panel
-**Next action:** Phase 3 — catalogue panel + routing detail (plans/20260511_PLAN_svp.md § Phase 3)
+**Working on:** Config updated — qwen3-coder-30b as best local code tier
+**Last commit:** 986cf46 — feat: qwen3-coder-30b-a3b-int4-ov as best local code model; Mistral→balanced
+**Next action:** SVP Phase 3 — model catalogue panel + routing detail (plans/20260511_PLAN_svp.md § Phase 3)
 **Blocked on:** nothing
-**Open questions:** (1) Assessor GPU device. (2) InternVLAdapter tool calling deferred.
-**Tests:** build clean (683ms); live DB test pending server restart
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
+**Tests:** server /health OK; build passes
