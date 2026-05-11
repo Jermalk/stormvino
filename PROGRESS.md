@@ -343,13 +343,21 @@
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) SDXL/Whisper concurrent contention untested. (3) monitor/api/metrics Postgres stubs TODO. (4) basta-f1 query_decisions MCP pending.
 **Tests:** server /health OK; build passes (111KB JS bundle)
 
+### 2026-05-11 — Session 35 (9a45417)
+**Working on:** Profile switching fixes + live ProfilesPanel config + VRAM profiler plan
+**Last commit:** 9a45417 — fix: proactive model swap on profile switch — eager preload + tier-safe fast shortcut
+**Next action:** VRAM profiler — Step 1: `model_vram_profiles` table in db.py
+**Blocked on:** nothing
+**Open questions:** (1) VLM VRAM footprint unknown — Step 2 measurement will answer qwen3-14b+VLM coexistence. (2) Assessor on GPU.0 — confirm doesn't compete for GPU.1 budget. (3) InternVLAdapter tool calling deferred.
+**Tests:** profile switching verified: Fast/Precise/Laborious all swap models without a request; build passes
+
 ---
 
 ## NOW
 
-**Working on:** ov_monitor bug fixes — all 5 issues resolved and committed
-**Last commit:** dd4d2da — fix: reset restarting state after server comes back up — poll /health until ok
-**Next action:** basta-f1 — implement query_decisions MCP tool; OR monitor/api/metrics Postgres stubs
+**Working on:** VRAM profiler + VLM coexistence — plan written, ready to implement
+**Last commit:** e192bc9 — feat: live profile config in health + dynamic ProfilesPanel descriptions
+**Next action:** VRAM profiler Step 1 — `model_vram_profiles` table in `db.py` (plan: plans/20260511_PLAN_vram_profiler.md)
 **Blocked on:** nothing
-**Open questions:** (1) InternVLAdapter tool calling deferred. (2) SDXL/Whisper GPU.1 concurrent contention untested. (3) monitor/api/metrics Postgres stubs TODO. (4) basta-f1 query_decisions MCP pending.
-**Tests:** server /health OK; Svelte build passes; routing fixes verified by health endpoint
+**Open questions:** (1) VLM VRAM footprint — answered by Step 2. (2) Assessor GPU device. (3) InternVLAdapter deferred.
+**Tests:** profile switching verified; 176/176 unit tests pass
