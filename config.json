@@ -3,14 +3,14 @@
     "device":                 "GPU.1",
     "ov_cache_dir":           "/opt/ov_server/ov_cache",
     "embedding_model":        "multilingual-e5-large-int8",
-    "embedding_device":       "GPU.0",
+    "embedding_device":       "GPU.1",
     "vision_model":           "qwen2.5-vl-7b-int4-ov",
     "vision_device":          "GPU.1",
     "model_aliases": {
         "qwen2.5-coder:14b":  "qwen2.5-coder-14b-int4"
     },
 
-    "max_loaded_models":      1,
+    "max_loaded_models":      2,
     "kv_cache_size_gb":       8,
     "vram_headroom_gb":       1.5,
     "max_ram_percent":        85.0,
@@ -36,9 +36,7 @@
 
     "default_model": "qwen3-14b-int4-ov",
     "agent_model":   "qwen3-8b-int4-ov",
-    "blocked_models": [
-        "phi-4-int4-ov"
-    ],
+    "blocked_models": [],
 
     "image_model":     "sdxl-fp16-ov",
     "image_device":    "GPU.1",
@@ -127,10 +125,10 @@
         "code": {
             "description": "Write, debug, explain, or refactor code",
             "models": [
-                { "id": "qwen2.5-coder-14b-int4",         "provider": "loc", "tier": "fast",     "max_context_tokens": 28000 },
-                { "id": "qwen3-14b-int4-ov",              "provider": "loc", "tier": "balanced",  "max_context_tokens": 28000 },
-                { "id": "mistral-small-3.2-24b-int4-ov",  "provider": "loc", "tier": "best" },
-                { "id": "Qwen3-Coder-480B-A35B",           "provider": "ovh", "tier": "best" }
+                { "id": "qwen2.5-coder-14b-int4",          "provider": "loc", "tier": "fast",     "max_context_tokens": 28000 },
+                { "id": "mistral-small-3.2-24b-int4-ov",   "provider": "loc", "tier": "balanced" },
+                { "id": "qwen3-coder-30b-a3b-int4-ov",    "provider": "loc", "tier": "best" },
+                { "id": "Qwen3-Coder-30B-A3B-Instruct",   "provider": "ovh", "tier": "best" }
             ]
         },
         "general": {
