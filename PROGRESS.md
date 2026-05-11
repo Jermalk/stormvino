@@ -355,9 +355,9 @@
 
 ## NOW
 
-**Working on:** VRAM profiler Steps 4 + 8 — background profiler + /admin/profile-models
-**Last commit:** 8ed2987 — feat: #cloud directive + context-overflow routing to OVH
-**Next action:** Live-test /admin/profile-models + startup profiler log; or next user-directed task
+**Working on:** SVP Phase 2 complete — live charts + model usage
+**Last commit:** e7f488e — feat: SVP Phase 2 — live Postgres charts + model usage panel
+**Next action:** Phase 3 — catalogue panel + routing detail (plans/20260511_PLAN_svp.md § Phase 3)
 **Blocked on:** nothing
 **Open questions:** (1) Assessor GPU device. (2) InternVLAdapter tool calling deferred.
-**Tests:** syntax checks pass; live test pending restart
+**Tests:** build clean (683ms); live DB test pending server restart
