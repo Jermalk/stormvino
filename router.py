@@ -45,6 +45,8 @@ SIMPLE_Q_RE = re.compile(
 
 _SIGNAL_ONLY_CLASSES: frozenset[str] = frozenset({"has_image", "has_tools"})
 
+_CLOUD_DIRECTIVE_RE = re.compile(r'#(ovh|cloud)\b', re.IGNORECASE)
+
 
 # ---------------------------------------------------------------------------
 # Signal detector — fast-path routing (O(1) / O(n_keywords), always <1 ms)
@@ -192,18 +194,27 @@ def complexity_score(req: Any) -> float:
     return max(0.0, min(1.0, score))
 
 
+def _has_cloud_directive(messages: list) -> bool:
+    """True if the last user message contains #ovh or #cloud."""
+    last_user = next((_text_content(m) for m in reversed(messages) if m.role == "user"), "")
+    return bool(_CLOUD_DIRECTIVE_RE.search(last_user))
+
+
 def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
-                  estimated_tokens: int = 0) -> dict:
+                  estimated_tokens: int = 0, scope_override: str | None = None,
+                  pref_override: str | None = None) -> dict:
     """Return {id, provider} for the best available model given task class and profile.
 
     Preference escalation: fastest → balanced → best → any available.
     balanced + complexity > 0.65 promotes to best.
+    scope_override: if set, replaces the global provider_scope for this call.
+    pref_override: if set, replaces profile model_preference before escalation logic.
     Models not on disk (provider=loc, absent from AVAILABLE_MODELS) are skipped with a warning.
     Models whose max_context_tokens < estimated_tokens are skipped (context overflow guard).
     Falls back to AGENT_MODEL if nothing is available.
     """
     all_models: list[dict] = _cfg.get("task_classes", {}).get(task_class, {}).get("models", [])
-    scope: str = _cfg.get("provider_scope", "local")
+    scope: str = scope_override or _cfg.get("provider_scope", "local")
 
     # Filter by scope, availability, and context limit
     available: list[dict] = []
@@ -224,9 +235,9 @@ def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
         log.error(f"[router] no available models for task_class='{task_class}' scope='{scope}' — fallback '{fallback_id}'")
         return {"id": fallback_id, "provider": "loc"}
 
-    # Effective preference, with complexity promotion
-    pref = profile.get("model_preference", "balanced")
-    if pref == "balanced" and complexity > 0.65:
+    # Effective preference: override wins, then profile, then complexity promotion
+    pref = pref_override or profile.get("model_preference", "balanced")
+    if not pref_override and pref == "balanced" and complexity > 0.65:
         pref = "best"
 
     def _fastest_from(pool: list[dict]) -> dict | None:

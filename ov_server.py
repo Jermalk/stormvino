@@ -792,10 +792,27 @@ async def chat(req: ChatRequest):
             _route_confidence = 1.0
         cplx = router.complexity_score(req)
         est_tokens = sum(len(_text_content(m)) for m in req.messages) // 4
-        model_entry = router._select_model(task_class, active_profile_cfg, cplx, est_tokens)
+
+        # Cloud directive: #ovh / #cloud in message → override scope + pref for this request.
+        # Only active when OVH backend is configured; otherwise ignored silently.
+        _ovh_configured = bool(_cfg.get("routing", {}).get("backends", {}).get("ovh"))
+        _cloud_directive = _ovh_configured and router._has_cloud_directive(req.messages)
+        _scope_override = "local+ovh" if _cloud_directive else None
+        _pref_override  = "best"      if _cloud_directive else None
+        if _cloud_directive:
+            log.info("[router] #cloud directive — scope=local+ovh pref=best")
+
+        model_entry = router._select_model(
+            task_class, active_profile_cfg, cplx, est_tokens,
+            scope_override=_scope_override, pref_override=_pref_override,
+        )
         model_id = model_entry["id"]
-        routing_decision = {"task_class": task_class, "model": model_id, "strategy": strategy}
-        log.info(f"[router] {strategy} → task_class='{task_class}' model='{model_id}'")
+        routing_decision = {
+            "task_class": task_class, "model": model_id, "strategy": strategy,
+            "cloud_directive": _cloud_directive,
+        }
+        log.info(f"[router] {strategy} → task_class='{task_class}' model='{model_id}'"
+                 + (" [#cloud]" if _cloud_directive else ""))
 
         # OVH model selected — find matching proxy backend and forward
         if model_entry.get("provider") != "loc":

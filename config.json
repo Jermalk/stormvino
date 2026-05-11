@@ -106,8 +106,8 @@
             "description": "Search the web, find current events, retrieve live information",
             "signal":      "has_tools",
             "models": [
-                { "id": "qwen3-8b-int4-ov",               "provider": "loc", "tier": "fast" },
-                { "id": "qwen3-14b-int4-ov",              "provider": "loc", "tier": "balanced" },
+                { "id": "qwen3-8b-int4-ov",               "provider": "loc", "tier": "fast",     "max_context_tokens": 28000 },
+                { "id": "qwen3-14b-int4-ov",              "provider": "loc", "tier": "balanced",  "max_context_tokens": 28000 },
                 { "id": "mistral-small-3.2-24b-int4-ov",  "provider": "loc", "tier": "best" },
                 { "id": "Qwen3-32B",                      "provider": "ovh", "tier": "best" }
             ]
@@ -117,8 +117,8 @@
             "signal":      "long_context",
             "context_threshold_tokens": 4000,
             "models": [
-                { "id": "qwen3-8b-int4-ov",               "provider": "loc", "tier": "fast" },
-                { "id": "qwen3-14b-int4-ov",              "provider": "loc", "tier": "balanced" },
+                { "id": "qwen3-8b-int4-ov",               "provider": "loc", "tier": "fast",     "max_context_tokens": 28000 },
+                { "id": "qwen3-14b-int4-ov",              "provider": "loc", "tier": "balanced",  "max_context_tokens": 28000 },
                 { "id": "mistral-small-3.2-24b-int4-ov",  "provider": "loc", "tier": "best" },
                 { "id": "Qwen3-32B",                      "provider": "ovh", "tier": "fast" },
                 { "id": "gpt-oss-120b",                   "provider": "ovh", "tier": "best" }
@@ -127,8 +127,8 @@
         "code": {
             "description": "Write, debug, explain, or refactor code",
             "models": [
-                { "id": "qwen2.5-coder-14b-int4",         "provider": "loc", "tier": "fast" },
-                { "id": "qwen3-14b-int4-ov",              "provider": "loc", "tier": "balanced" },
+                { "id": "qwen2.5-coder-14b-int4",         "provider": "loc", "tier": "fast",     "max_context_tokens": 28000 },
+                { "id": "qwen3-14b-int4-ov",              "provider": "loc", "tier": "balanced",  "max_context_tokens": 28000 },
                 { "id": "mistral-small-3.2-24b-int4-ov",  "provider": "loc", "tier": "best" },
                 { "id": "Qwen3-Coder-480B-A35B",           "provider": "ovh", "tier": "best" }
             ]
@@ -147,8 +147,8 @@
                 "jak zaplanować wakacje"
             ],
             "models": [
-                { "id": "qwen3-8b-int4-ov",              "provider": "loc", "tier": "fast" },
-                { "id": "qwen3-14b-int4-ov",             "provider": "loc", "tier": "balanced" },
+                { "id": "qwen3-8b-int4-ov",              "provider": "loc", "tier": "fast",     "max_context_tokens": 28000 },
+                { "id": "qwen3-14b-int4-ov",             "provider": "loc", "tier": "balanced",  "max_context_tokens": 28000 },
                 { "id": "mistral-small-3.2-24b-int4-ov", "provider": "loc", "tier": "best" },
                 { "id": "Qwen3-32B",                     "provider": "ovh", "tier": "best" }
             ]
