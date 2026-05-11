@@ -37,8 +37,15 @@
     if (restarting) return
     restarting = true
     await fetch('/maintenance/restart', { method: 'POST' }).catch(() => {})
-    // Server will be back in ~15s — show restarting state until health comes back
-    // (App.svelte polling will surface the reconnect automatically)
+    // Wait for server to go down, then poll until it's back
+    await new Promise(r => setTimeout(r, 3000))
+    while (restarting) {
+      try {
+        const r = await fetch('/health')
+        if (r.ok) { restarting = false; break }
+      } catch { /* still down */ }
+      await new Promise(r => setTimeout(r, 1000))
+    }
   }
 </script>
 
