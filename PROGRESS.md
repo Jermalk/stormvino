@@ -335,11 +335,21 @@
 
 ---
 
+### 2026-05-11 — Session 34 (dd4d2da)
+**Working on:** ov_monitor bug fixes — fan layout, laborious routing, profile KV desc, scope/restart UI, restart freeze
+**Last commit:** dd4d2da — fix: reset restarting state after server comes back up — poll /health until ok
+**Next action:** basta-f1 query_decisions MCP tool; or monitor/api/metrics Postgres stubs
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) SDXL/Whisper concurrent contention untested. (3) monitor/api/metrics Postgres stubs TODO. (4) basta-f1 query_decisions MCP pending.
+**Tests:** server /health OK; build passes (111KB JS bundle)
+
+---
+
 ## NOW
 
-**Working on:** FP16 SDXL + VRAM guard + embedding threshold + ov_monitor skeleton
-**Last commit:** f565ba5 — feat: switch image model to sdxl-fp16-ov; fix test MODEL_DIR from config
-**Next action:** ov_monitor skeleton — `cd monitor && npm install && npm run dev` to verify; then implement Postgres stubs
+**Working on:** ov_monitor bug fixes — all 5 issues resolved and committed
+**Last commit:** dd4d2da — fix: reset restarting state after server comes back up — poll /health until ok
+**Next action:** basta-f1 — implement query_decisions MCP tool; OR monitor/api/metrics Postgres stubs
 **Blocked on:** nothing
-**Open questions:** (1) InternVLAdapter tool calling deferred. (2) monitor/api/metrics Postgres stubs TODO. (3) basta-f1 query_decisions MCP still pending.
-**Tests:** 7/7 image_gen (FP16), 8/8 stt, 22/22 unit — all pass
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) SDXL/Whisper GPU.1 concurrent contention untested. (3) monitor/api/metrics Postgres stubs TODO. (4) basta-f1 query_decisions MCP pending.
+**Tests:** server /health OK; Svelte build passes; routing fixes verified by health endpoint
