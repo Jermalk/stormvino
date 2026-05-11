@@ -4,66 +4,145 @@
   import 'uplot/dist/uPlot.min.css'
   import { fetchMetrics } from './api.js'
 
-  let container
-  let plot
-  let timer
-
   const METRICS = [
-    { key: 'tok_per_sec', label: 'tok/s',       color: '#4e9af1' },
-    { key: 'elapsed_sec', label: 'elapsed (s)',  color: '#f1a14e' },
+    { key: 'tok_per_sec',       label: 'tok/s',      unit: 'tok/s', color: '#4e9af1' },
+    { key: 'elapsed_sec',       label: 'duration',   unit: 's',     color: '#f1a14e' },
+    { key: 'completion_tokens', label: 'out tokens', unit: 'tok',   color: '#4ef1a0' },
+    { key: 'prompt_tokens',     label: 'in tokens',  unit: 'tok',   color: '#9b6ef3' },
+    { key: 'vram_used_gb',      label: 'VRAM',       unit: 'GB',    color: '#f7c44e' },
+    { key: 'ram_used_pct',      label: 'RAM %',      unit: '%',     color: '#f1544e' },
   ]
+  const RANGES = [
+    { minutes: 15,   label: '15m' },
+    { minutes: 60,   label: '1h'  },
+    { minutes: 360,  label: '6h'  },
+    { minutes: 1440, label: '24h' },
+  ]
+
   let activeMetric = $state(METRICS[0])
+  let activeRange  = $state(RANGES[1])
+  let container    = $state(null)
+  let plot         = null
+  let timer        = null
+  let isEmpty      = $state(true)
+  let loading      = $state(false)
 
   async function load() {
-    const data = await fetchMetrics(activeMetric.key, 60).catch(() => null)
-    if (!data || !data.ts?.length) return
+    if (!container) return
+    loading = true
+    try {
+      const data = await fetchMetrics(activeMetric.key, activeRange.minutes)
+      loading = false
+      isEmpty = !data.ts?.length
+      if (plot) { plot.destroy(); plot = null }
+      if (!data.ts?.length) return
 
-    const opts = {
-      width:  container.clientWidth,
-      height: 200,
-      scales: { x: { time: true }, y: { auto: true } },
-      series: [
-        {},
-        { label: activeMetric.label, stroke: activeMetric.color, width: 2, fill: activeMetric.color + '22' },
-      ],
-      axes: [{ }, { size: 50 }],
+      const opts = {
+        width:  container.clientWidth || 600,
+        height: 180,
+        scales: { x: { time: true }, y: { auto: true } },
+        series: [
+          {},
+          {
+            label:  activeMetric.unit,
+            stroke: activeMetric.color,
+            width:  1.5,
+            fill:   activeMetric.color + '18',
+            points: { show: data.ts.length < 60 },
+          },
+        ],
+        axes: [
+          { stroke: '#ffffff40', ticks: { stroke: '#ffffff15' }, grid: { stroke: '#ffffff08' } },
+          {
+            size:   52,
+            stroke: '#ffffff40',
+            ticks:  { stroke: '#ffffff15' },
+            grid:   { stroke: '#ffffff08' },
+          },
+        ],
+        cursor: { stroke: '#ffffff30', width: 1 },
+      }
+      plot = new uPlot(opts, [data.ts, data.values], container)
+    } catch {
+      loading = false
     }
-
-    if (plot) { plot.destroy(); plot = null }
-    plot = new uPlot(opts, [data.ts, data.values], container)
   }
 
+  function resize() {
+    if (plot && container) plot.setSize({ width: container.clientWidth, height: 180 })
+  }
+
+  let ro
   onMount(() => {
     load()
     timer = setInterval(load, 30_000)
+    ro = new ResizeObserver(resize)
+    if (container) ro.observe(container)
   })
-
   onDestroy(() => {
     clearInterval(timer)
+    ro?.disconnect()
     plot?.destroy()
   })
+
+  function selectMetric(m) { activeMetric = m; load() }
+  function selectRange(r)  { activeRange  = r; load() }
 </script>
 
 <section class="charts-panel">
   <div class="toolbar">
-    <h2>History (60 min)</h2>
+    <h2>History</h2>
     <div class="tabs">
       {#each METRICS as m}
-        <button class:active={activeMetric.key === m.key} onclick={() => { activeMetric = m; load() }}>
+        <button class:active={activeMetric.key === m.key} onclick={() => selectMetric(m)}>
           {m.label}
         </button>
       {/each}
     </div>
+    <div class="tabs range-tabs">
+      {#each RANGES as r}
+        <button class:active={activeRange.minutes === r.minutes} onclick={() => selectRange(r)}>
+          {r.label}
+        </button>
+      {/each}
+    </div>
   </div>
-  <div bind:this={container} class="chart-container"></div>
+
+  <div bind:this={container} class="chart-container">
+    {#if loading}
+      <div class="overlay dim">loading…</div>
+    {:else if isEmpty}
+      <div class="overlay dim">no data for this period</div>
+    {/if}
+  </div>
 </section>
 
 <style>
-  .charts-panel { padding: 1rem; }
-  .toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: .5rem; }
-  h2 { margin: 0; font-size: 1rem; text-transform: uppercase; letter-spacing: .08em; opacity: .6; }
-  .tabs { display: flex; gap: .25rem; }
-  button { background: var(--card); border: none; border-radius: 4px; padding: .25rem .6rem; cursor: pointer; font-size: .8rem; color: inherit; opacity: .6; }
-  button.active { opacity: 1; background: var(--blue); color: #fff; }
-  .chart-container { min-height: 200px; }
+  .charts-panel { padding: .75rem 1rem; }
+  .toolbar {
+    display: flex; align-items: center; gap: .5rem;
+    flex-wrap: wrap; margin-bottom: .5rem;
+  }
+  h2 {
+    font-size: .7rem; text-transform: uppercase; letter-spacing: .08em;
+    opacity: .45; white-space: nowrap; margin-right: .25rem;
+  }
+  .tabs { display: flex; gap: .2rem; flex-wrap: wrap; }
+  .range-tabs { margin-left: auto; }
+  button {
+    background: var(--card); border: 1px solid #ffffff0a;
+    border-radius: 4px; padding: .2rem .55rem;
+    cursor: pointer; font-size: .75rem; color: inherit; opacity: .55;
+    transition: opacity .12s, background .12s;
+  }
+  button:hover  { opacity: .85; }
+  button.active { opacity: 1; background: #ffffff12; border-color: #ffffff20; }
+  .chart-container { min-height: 200px; position: relative; }
+  .overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .8rem; pointer-events: none;
+  }
+  .dim { opacity: .3; }
+  :global(.uplot) { width: 100% !important; }
 </style>

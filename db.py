@@ -339,6 +339,73 @@ async def query_summary() -> dict[str, Any]:
         return {}
 
 
+_INFERENCE_METRICS: frozenset[str] = frozenset(
+    {"tok_per_sec", "elapsed_sec", "completion_tokens", "prompt_tokens"}
+)
+_SNAPSHOT_METRICS: frozenset[str] = frozenset({"vram_used_gb", "ram_used_pct"})
+VALID_CHART_METRICS: frozenset[str] = _INFERENCE_METRICS | _SNAPSHOT_METRICS
+
+
+async def query_metrics_series(
+    metric: str,
+    minutes: int = 60,
+) -> tuple[list[int], list[float]]:
+    """Return (unix_timestamps, float_values) for uPlot.
+
+    Queries inference_events for inference metrics, system_snapshots for
+    system metrics. metric must be in VALID_CHART_METRICS (allowlist).
+    """
+    if _pool is None or metric not in VALID_CHART_METRICS:
+        return [], []
+    from datetime import datetime, timezone, timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    try:
+        table  = "inference_events" if metric in _INFERENCE_METRICS else "system_snapshots"
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT EXTRACT(EPOCH FROM ts)::bigint AS t,
+                       {metric}::double precision AS v
+                FROM {table}
+                WHERE ts > $1 AND {metric} IS NOT NULL
+                ORDER BY ts
+                """,
+                cutoff,
+            )
+        return [r["t"] for r in rows], [r["v"] for r in rows]
+    except Exception as exc:
+        log.warning(f"DB query_metrics_series({metric}) failed: {exc}")
+        return [], []
+
+
+async def query_model_usage(hours: int = 24) -> list[dict[str, Any]]:
+    """Per-model summary over the last N hours: requests, avg tok/s, total tokens."""
+    if _pool is None:
+        return []
+    from datetime import datetime, timezone, timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT model_selected                                   AS model_id,
+                       COUNT(*)::int                                    AS requests,
+                       ROUND(AVG(tok_per_sec)::numeric, 1)             AS avg_tok_per_sec,
+                       COALESCE(SUM(completion_tokens), 0)::int        AS total_tokens,
+                       ROUND(AVG(elapsed_sec)::numeric, 2)             AS avg_elapsed_sec
+                FROM inference_events
+                WHERE ts > $1 AND model_selected IS NOT NULL
+                GROUP BY model_selected
+                ORDER BY requests DESC
+                """,
+                cutoff,
+            )
+        return [dict(r) for r in rows]
+    except Exception as exc:
+        log.warning(f"DB query_model_usage failed: {exc}")
+        return []
+
+
 async def prune_old_events(days: int = 30) -> None:
     """Delete events older than `days` days. Safe to call at startup."""
     if _pool is None:

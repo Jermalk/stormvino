@@ -34,6 +34,12 @@ export async function switchScope(scope) {
   })
 }
 
+export async function fetchModelUsage(hours = 24) {
+  const r = await fetch(`${BASE}/monitor/api/model-usage?hours=${hours}`)
+  if (!r.ok) throw new Error(`/monitor/api/model-usage ${r.status}`)
+  return r.json()
+}
+
 export async function fetchProfilerStatus() {
   const r = await fetch(`${BASE}/admin/profile-models`)
   if (!r.ok) throw new Error(`/admin/profile-models ${r.status}`)

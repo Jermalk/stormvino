@@ -8,6 +8,7 @@
   import ProfilerPanel from './lib/ProfilerPanel.svelte'
   import SystemPanel   from './lib/SystemPanel.svelte'
   import Charts        from './lib/Charts.svelte'
+  import ModelUsage    from './lib/ModelUsage.svelte'
 
   let health   = $state(null)
   let sys      = $state(null)
@@ -72,8 +73,13 @@
     </div>
   </div>
 
-  <div class="charts-row">
-    <Charts />
+  <div class="bottom-grid">
+    <div class="bottom-cell border-right">
+      <Charts />
+    </div>
+    <div class="bottom-cell">
+      <ModelUsage />
+    </div>
   </div>
 </div>
 
@@ -126,9 +132,17 @@
   .border-top    { border-top:    1px solid var(--border); }
   .divider { border-top: 1px solid var(--border); margin: 0 1rem; }
 
-  .charts-row {
+  .bottom-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
     border-top: 1px solid var(--border);
     background: var(--card);
+  }
+  .bottom-cell { min-width: 0; }
+
+  @media (max-width: 800px) {
+    .bottom-grid { grid-template-columns: 1fr; }
+    .bottom-cell.border-right { border-right: none; border-bottom: 1px solid var(--border); }
   }
 
   @media (max-width: 640px) {

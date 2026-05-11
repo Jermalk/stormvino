@@ -1388,18 +1388,24 @@ async def monitor_system():
 
 @app.get("/monitor/api/metrics")
 async def monitor_metrics(metric: str = "tok_per_sec", minutes: int = 60):
-    """Time-series from Postgres for uPlot. Returns {ts, values}."""
-    # TODO: SELECT EXTRACT(EPOCH FROM completed_at), <metric> FROM request_log
-    #       WHERE completed_at > NOW() - INTERVAL '<minutes> minutes'
-    return {"ts": [], "values": [], "metric": metric, "minutes": minutes}
+    """Time-series from Postgres for uPlot.
+
+    metric: one of tok_per_sec | elapsed_sec | completion_tokens | prompt_tokens
+            | vram_used_gb | ram_used_pct
+    Returns {ts: [int…], values: [float…], metric, minutes}
+    """
+    if metric not in db.VALID_CHART_METRICS:
+        raise HTTPException(status_code=400, detail=f"Unknown metric '{metric}'")
+    minutes = max(5, min(minutes, 1440))
+    ts, values = await db.query_metrics_series(metric, minutes)
+    return {"ts": ts, "values": values, "metric": metric, "minutes": minutes}
 
 
 @app.get("/monitor/api/model-usage")
 async def monitor_model_usage(hours: int = 24):
-    """Per-model request + token summary from Postgres."""
-    # TODO: SELECT model_id, COUNT(*), AVG(tok_per_sec), SUM(tokens)
-    #       FROM request_log GROUP BY model_id
-    return []
+    """Per-model request + token summary from Postgres over the last N hours."""
+    hours = max(1, min(hours, 168))
+    return await db.query_model_usage(hours)
 
 
 if __name__ == "__main__":
