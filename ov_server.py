@@ -904,12 +904,12 @@ async def chat(req: ChatRequest):
     # ── Profile behavioral settings ─────────────────────────────────────────
     effective_thinking = req.thinking and active_profile_cfg.get("thinking", False) and not is_agent
     profile_max_tokens = active_profile_cfg.get("max_new_tokens", MAX_NEW_TOKENS_DEFAULT)
-    # Client-supplied max_tokens wins when it differs from the request default;
-    # agent path caps tokens via MAX_NEW_TOKENS_AGENT (short tool-selection JSON).
+    # Profile is a floor: client can request more tokens than the profile allows,
+    # but cannot sneak in a lower cap (e.g. AnythingLLM default max_tokens=200).
+    # Agent path bypasses both — short tool-selection JSON needs a tight cap.
     effective_max_tokens = (
-        req.max_tokens
-        if req.max_tokens is not None
-        else (MAX_NEW_TOKENS_AGENT if is_agent else profile_max_tokens)
+        MAX_NEW_TOKENS_AGENT if is_agent
+        else max(req.max_tokens or 0, profile_max_tokens)
     )
 
     _assessor_model_id = _cfg.get("assessor", {}).get("model", "")
