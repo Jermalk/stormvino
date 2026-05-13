@@ -84,7 +84,7 @@
               { size: 52, stroke: '#ffffff40', ticks: { stroke: '#ffffff15' }, grid: { stroke: '#ffffff08' } },
               { scale: 'y2', side: 1, size: 28, stroke: '#4ef1a060',
                 ticks: { show: false }, grid: { show: false },
-                values: (_, v) => v != null ? String(Math.round(v)) : '' },
+                values: (_, vals) => vals.map(v => v != null ? String(Math.round(v)) : '') },
             ]
           : [
               { stroke: '#ffffff40', ticks: { stroke: '#ffffff15' }, grid: { stroke: '#ffffff08' } },
