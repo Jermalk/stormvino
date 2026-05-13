@@ -403,11 +403,21 @@
 
 ---
 
+### 2026-05-14 — Session 41 (6bf0b25)
+**Working on:** SVP Phase 4 — VRAM history overlay, vram-profiles panel, unified ModelCataloguePanel
+**Last commit:** 6bf0b25 — refactor: unify Profiler + Catalogue + VRAM Profiles into ModelCataloguePanel
+**Next action:** SVP Phase 5 — mobile/responsive polish; or fix pre-existing test_tier_from_task_classes_applied
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) Pre-existing test failure: test_tier_from_task_classes_applied — catalogue tier logic bug.
+**Tests:** fail — 1 pre-existing (test_tier_from_task_classes_applied); 175/176 pass; build clean 125KB
+
+---
+
 ## NOW
 
-**Working on:** Kaizen sprint — CODE_REVIEW_CONS.md Phases A–F
-**Last commit:** f07b718 — feat: kaizen Phase F — optional API key auth middleware
-**Next action:** SVP Phase 4 — Postgres time-series charts (plans/20260511_PLAN_svp.md § Phase 4)
+**Working on:** SVP Phase 4 complete + panel consolidation
+**Last commit:** 6bf0b25 — refactor: unify Profiler + Catalogue + VRAM Profiles into ModelCataloguePanel
+**Next action:** SVP Phase 5 — mobile/responsive polish (plans/20260511_PLAN_svp.md § Phase 5); or fix pre-existing test_tier_from_task_classes_applied
 **Blocked on:** nothing
-**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) Pre-existing test failure: test_tier_from_task_classes_applied — catalogue tier logic bug, unrelated to this session.
-**Tests:** fail — 1 pre-existing (test_tier_from_task_classes_applied); 175/176 pass; /health ok, server running
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) Pre-existing test failure: test_tier_from_task_classes_applied — catalogue tier logic bug.
+**Tests:** fail — 1 pre-existing; 175/176 pass; build clean 125KB; /health ok
