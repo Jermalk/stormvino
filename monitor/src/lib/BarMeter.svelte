@@ -1,6 +1,6 @@
 <script>
-  /** @type {{ pct: number, color?: string }} */
-  let { pct = 0, color = null } = $props()
+  /** @type {{ pct: number, color?: string, label?: string|null }} */
+  let { pct = 0, color = null, label = null } = $props()
   const clamped = $derived(Math.max(0, Math.min(100, pct)))
   const auto = $derived(!color ? (pct < 60 ? 'var(--green)' : pct < 85 ? 'var(--yellow)' : 'var(--red)') : color)
 </script>
@@ -9,7 +9,7 @@
   <div class="bar-track">
     <div class="bar-fill" style="width:{clamped}%; background:{auto}"></div>
   </div>
-  <span class="pct" style="color:{auto}">{pct.toFixed(0)}%</span>
+  <span class="pct" style="color:{auto}">{label ?? `${pct.toFixed(0)}%`}</span>
 </div>
 
 <style>

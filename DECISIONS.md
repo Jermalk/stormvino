@@ -433,3 +433,15 @@
 **Rationale:** `raise_for_status()` inside `client.stream()` leaves the response body unread; accessing `.text` on the raised exception triggers `ResponseNotRead`. Explicit `aread()` drains the body cleanly. Yielding an SSE error event prevents the generator from throwing inside StreamingResponse (which logs an unhandled exception after headers are sent).
 **Rejected alternative:** Wrap raise_for_status() in try/except ResponseNotRead — treats a design issue as an exception; harder to read.
 **Affects:** ov_server.py OVH proxy `stream_gen()` function
+
+### 2026-05-14 — _tier_map_for_provider sentinel uses None/rank-0 not "fast"/rank-1
+**Decision:** Changed `result.get(mid, "fast")` to `result.get(mid)` with `_TIER_RANK.get(..., 0)` fallback in `_tier_map_for_provider`.
+**Rationale:** Using "fast" (rank 1) as the "not yet seen" sentinel meant an explicit tier="fast" assignment was silently dropped (1 > 1 is False). Using None (rank 0) ensures any explicit tier wins over the absent-from-result default.
+**Rejected alternative:** Change `>` to `>=` — would allow a lower-tier entry to overwrite a higher-tier one if processed in wrong order; semantics less clear.
+**Affects:** catalogue.py — _tier_map_for_provider
+
+### 2026-05-14 — Charts loadSeq counter guards against stale fetch responses
+**Decision:** Added `loadSeq` integer counter to Charts.svelte; each `load()` call captures `seq = ++loadSeq` and discards the response if `seq !== loadSeq` on arrival.
+**Rationale:** The 30s auto-refresh interval can have a fetch in flight when the user clicks a range button. Without the guard, the in-flight response (for the old range) arrives after the new response and overwrites the chart — making range buttons appear broken.
+**Rejected alternative:** Cancel in-flight requests via AbortController — works but adds complexity; the guard is simpler and sufficient since we only render once.
+**Affects:** monitor/src/lib/Charts.svelte

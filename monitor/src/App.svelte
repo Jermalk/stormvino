@@ -135,4 +135,9 @@
     .cell { border-right: none; border-bottom: 1px solid var(--border); }
     .cell:last-child { border-bottom: none; }
   }
+
+  /* Narrow screens: strip header to dot + title only */
+  @media (max-width: 640px) {
+    .host, .clock { display: none; }
+  }
 </style>

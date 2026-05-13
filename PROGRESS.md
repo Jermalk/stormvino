@@ -413,11 +413,21 @@
 
 ---
 
+### 2026-05-14 — Session 42 (TBD)
+**Working on:** test fix, SVP Phase 5 responsive + GPU bars, Charts race fix, infergate gap analysis
+**Last commit:** 5aa60d2 — docs: session wrap — SVP Phase 4, unified ModelCataloguePanel, cleanup
+**Next action:** free-form — no outstanding plan items; infergate improvements in separate thread
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
+**Tests:** pass — 176/176; build clean 125KB
+
+---
+
 ## NOW
 
-**Working on:** SVP Phase 4 complete + panel consolidation
-**Last commit:** 6bf0b25 — refactor: unify Profiler + Catalogue + VRAM Profiles into ModelCataloguePanel
-**Next action:** SVP Phase 5 — mobile/responsive polish (plans/20260511_PLAN_svp.md § Phase 5); or fix pre-existing test_tier_from_task_classes_applied
+**Working on:** Session 42 wrap — test fix, SVP Phase 5, infergate gap doc
+**Last commit:** TBD
+**Next action:** free-form — infergate improvements tracked in plans/20260514_infergate_gaps.md
 **Blocked on:** nothing
-**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) Pre-existing test failure: test_tier_from_task_classes_applied — catalogue tier logic bug.
-**Tests:** fail — 1 pre-existing; 175/176 pass; build clean 125KB; /health ok
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
+**Tests:** pass — 176/176; build clean 125KB

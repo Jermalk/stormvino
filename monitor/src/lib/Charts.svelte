@@ -26,12 +26,15 @@
   let timer        = null
   let isEmpty      = $state(true)
   let loading      = $state(false)
+  let loadSeq      = 0
 
   async function load() {
     if (!container) return
+    const seq = ++loadSeq
     loading = true
     try {
       const data = await fetchMetrics(activeMetric.key, activeRange.minutes)
+      if (seq !== loadSeq) return  // stale — a newer load is in flight
       loading = false
       isEmpty = !data.ts?.length
       if (plot) { plot.destroy(); plot = null }

@@ -22,7 +22,7 @@
   function fanColor(rpm) {
     return rpm == null ? 'var(--text)' : rpm < 1500 ? 'var(--green)' : rpm < 2500 ? 'var(--yellow)' : 'var(--red)'
   }
-  function na(v, fmt = v => v) { return v == null ? '—' : fmt(v) }
+
 </script>
 
 <section class="panel">
@@ -50,23 +50,29 @@
       </div>
     </div>
 
-    <!-- Fixed 2×2 grid so layout never shifts when fan/power data arrives -->
-    <div class="specs-grid">
-      <div class="spec">
-        <span class="slabel">GT temp</span>
-        <span style="color:{tempColor(gpu.temp_gt_c)}">{na(gpu.temp_gt_c, v => `${v} °C`)}</span>
+    <div class="group">
+      <div class="row">
+        <span class="label">GT temp</span>
+        <BarMeter pct={gpu.temp_gt_c != null ? gpu.temp_gt_c / 105 * 100 : 0}
+                  color={tempColor(gpu.temp_gt_c)}
+                  label={gpu.temp_gt_c != null ? `${gpu.temp_gt_c} °C` : '—'} />
       </div>
-      <div class="spec">
-        <span class="slabel">VRAM temp</span>
-        <span style="color:{tempColor(gpu.temp_mem_c)}">{na(gpu.temp_mem_c, v => `${v} °C`)}</span>
+      <div class="row">
+        <span class="label">VRAM temp</span>
+        <BarMeter pct={gpu.temp_mem_c != null ? gpu.temp_mem_c / 105 * 100 : 0}
+                  color={tempColor(gpu.temp_mem_c)}
+                  label={gpu.temp_mem_c != null ? `${gpu.temp_mem_c} °C` : '—'} />
       </div>
-      <div class="spec">
-        <span class="slabel">Fan</span>
-        <span style="color:{fanColor(gpu.fan_rpm)}">{na(gpu.fan_rpm, v => `${v} RPM`)}</span>
+      <div class="row">
+        <span class="label">Fan</span>
+        <BarMeter pct={gpu.fan_rpm != null ? Math.min(gpu.fan_rpm / 3500 * 100, 100) : 0}
+                  color={fanColor(gpu.fan_rpm)}
+                  label={gpu.fan_rpm != null ? `${gpu.fan_rpm} RPM` : '—'} />
       </div>
-      <div class="spec">
-        <span class="slabel">Power</span>
-        <span>{na(gpu.power_w, v => `${v} W${gpu.power_cap_w ? ` / ${gpu.power_cap_w} W` : ''}`)}</span>
+      <div class="row">
+        <span class="label">Power</span>
+        <BarMeter pct={gpu.power_w != null ? Math.min(gpu.power_w / (gpu.power_cap_w ?? 225) * 100, 100) : 0}
+                  label={gpu.power_w != null ? `${gpu.power_w} W${gpu.power_cap_w ? ` / ${gpu.power_cap_w} W` : ''}` : '—'} />
       </div>
     </div>
   {/if}
@@ -80,12 +86,4 @@
   .row  { display: flex; align-items: center; gap: .5rem; margin-bottom: .2rem; font-size: .82rem; }
   .row.sub { opacity: .5; font-size: .75rem; }
   .label { width: 9rem; flex-shrink: 0; opacity: .5; font-size: .78rem; white-space: nowrap; }
-  /* Fixed 2×2 grid — always occupies the same space regardless of null values */
-  .specs-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: .4rem .5rem;
-  }
-  .spec { display: flex; flex-direction: column; font-size: .82rem; min-height: 2.4rem; }
-  .slabel { font-size: .68rem; opacity: .45; margin-bottom: .1rem; }
 </style>

@@ -39,7 +39,7 @@ def _tier_map_for_provider(provider: str) -> dict[str, str]:
             if m.get("provider") == provider:
                 mid = m["id"]
                 new_tier = m.get("tier", "fast")
-                if _TIER_RANK.get(new_tier, 1) > _TIER_RANK.get(result.get(mid, "fast"), 1):
+                if _TIER_RANK.get(new_tier, 1) > _TIER_RANK.get(result.get(mid), 0):
                     result[mid] = new_tier
     return result
 

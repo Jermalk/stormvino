@@ -138,4 +138,9 @@
   .loading-item .leg-label { color: var(--yellow); opacity: 1; animation: leg-pulse 1.4s ease-in-out infinite; }
   .loading-dot { background: var(--yellow); }
   @keyframes leg-pulse { 0%,100% { opacity:.6 } 50% { opacity:1 } }
+
+  /* Narrow: hide legend, GB numbers in header are enough */
+  @media (max-width: 640px) {
+    .legend { display: none; }
+  }
 </style>

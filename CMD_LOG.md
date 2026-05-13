@@ -240,3 +240,8 @@ git commit                      # 01bc6bd
 # Removed from config.json: qwen3-8b-int4-ov (broken), qwen3-30b-a3b-int4-ov (broken), qwen3-coder-30b-a3b-int4-ov
 # assessor.model: qwen3-14b-int4-ov (confirmed working, pipe reused for general/web_search/document)
 ```
+
+## 2026-05-14 — responsive polish + GPU bars
+```
+npm run build
+```
