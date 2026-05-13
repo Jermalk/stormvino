@@ -5,12 +5,20 @@ All public functions are fire-and-forget safe: they never raise and
 never block the inference path. If the pool is None (postgres_dsn absent
 or DB unreachable), every call is a no-op.
 """
-from __future__ import annotations
-
 import asyncio
+import json
 import logging
 import time
+from datetime import datetime, timezone, timedelta
 from typing import Any
+
+try:
+    import asyncpg
+    import numpy as np
+    from pgvector.asyncpg import register_vector
+    _HAS_DEPS = True
+except ImportError:
+    _HAS_DEPS = False
 
 log = logging.getLogger("ov_server.db")
 
@@ -19,12 +27,10 @@ _pool = None   # asyncpg.Pool | None
 
 async def _init_conn(conn) -> None:
     """Per-connection init: register JSONB codec and pgvector type."""
-    import json as _json
-    from pgvector.asyncpg import register_vector
     await conn.set_type_codec(
         "jsonb",
-        encoder=_json.dumps,
-        decoder=_json.loads,
+        encoder=json.dumps,
+        decoder=json.loads,
         schema="pg_catalog",
     )
     await register_vector(conn)
@@ -58,8 +64,10 @@ async def init_pool(dsn: str | None) -> None:
     if not dsn:
         log.info("postgres_dsn not configured — observability DB disabled")
         return
+    if not _HAS_DEPS:
+        log.warning("asyncpg/pgvector not installed — observability DB disabled")
+        return
     try:
-        import asyncpg
         _pool = await asyncpg.create_pool(dsn, min_size=1, max_size=4, init=_init_conn)
         log.info(f"Observability DB connected: {dsn}")
         await _ensure_schema()
@@ -82,7 +90,7 @@ def _bg(coro) -> None:
     try:
         asyncio.get_running_loop().create_task(coro)
     except RuntimeError:
-        pass  # no running loop (e.g. test context)
+        coro.close()  # no running loop — close to avoid unclosed coroutine warning
 
 
 async def _write_inference_event(
@@ -105,7 +113,6 @@ async def _write_inference_event(
     if _pool is None:
         return
     try:
-        import numpy as np
         emb = np.array(query_embedding, dtype=np.float32) if query_embedding else None
         async with _pool.acquire() as conn:
             await conn.execute(
@@ -164,7 +171,6 @@ async def _write_centroid_snapshot(
     if _pool is None:
         return
     try:
-        import numpy as np
         vec = np.array(centroid, dtype=np.float32)
         async with _pool.acquire() as conn:
             await conn.execute(
@@ -339,11 +345,17 @@ async def query_summary() -> dict[str, Any]:
         return {}
 
 
-_INFERENCE_METRICS: frozenset[str] = frozenset(
-    {"tok_per_sec", "elapsed_sec", "completion_tokens", "prompt_tokens"}
-)
-_SNAPSHOT_METRICS: frozenset[str] = frozenset({"vram_used_gb", "ram_used_pct"})
-VALID_CHART_METRICS: frozenset[str] = _INFERENCE_METRICS | _SNAPSHOT_METRICS
+# Each entry: metric_name → (table, column). Both are string literals — not user input.
+# Using dict dispatch instead of f-string interpolation eliminates the SQL injection pattern.
+_METRIC_SQL: dict[str, tuple[str, str]] = {
+    "tok_per_sec":       ("inference_events", "tok_per_sec"),
+    "elapsed_sec":       ("inference_events", "elapsed_sec"),
+    "completion_tokens": ("inference_events", "completion_tokens"),
+    "prompt_tokens":     ("inference_events", "prompt_tokens"),
+    "vram_used_gb":      ("system_snapshots", "vram_used_gb"),
+    "ram_used_pct":      ("system_snapshots", "ram_used_pct"),
+}
+VALID_CHART_METRICS: frozenset[str] = frozenset(_METRIC_SQL)
 
 
 async def query_metrics_series(
@@ -352,24 +364,18 @@ async def query_metrics_series(
 ) -> tuple[list[int], list[float]]:
     """Return (unix_timestamps, float_values) for uPlot.
 
-    Queries inference_events for inference metrics, system_snapshots for
-    system metrics. metric must be in VALID_CHART_METRICS (allowlist).
+    Queries inference_events or system_snapshots depending on metric.
+    metric must be in VALID_CHART_METRICS (allowlist via _METRIC_SQL keys).
     """
-    if _pool is None or metric not in VALID_CHART_METRICS:
+    if _pool is None or metric not in _METRIC_SQL:
         return [], []
-    from datetime import datetime, timezone, timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    table, col = _METRIC_SQL[metric]
     try:
-        table  = "inference_events" if metric in _INFERENCE_METRICS else "system_snapshots"
         async with _pool.acquire() as conn:
             rows = await conn.fetch(
-                f"""
-                SELECT EXTRACT(EPOCH FROM ts)::bigint AS t,
-                       {metric}::double precision AS v
-                FROM {table}
-                WHERE ts > $1 AND {metric} IS NOT NULL
-                ORDER BY ts
-                """,
+                f"SELECT EXTRACT(EPOCH FROM ts)::bigint AS t, {col}::double precision AS v "
+                f"FROM {table} WHERE ts > $1 AND {col} IS NOT NULL ORDER BY ts",
                 cutoff,
             )
         return [r["t"] for r in rows], [r["v"] for r in rows]
@@ -382,7 +388,6 @@ async def query_model_usage(hours: int = 24) -> list[dict[str, Any]]:
     """Per-model summary over the last N hours: requests, avg tok/s, total tokens."""
     if _pool is None:
         return []
-    from datetime import datetime, timezone, timedelta
     cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     try:
         async with _pool.acquire() as conn:
@@ -411,7 +416,6 @@ async def prune_old_events(days: int = 30) -> None:
     if _pool is None:
         return
     try:
-        from datetime import datetime, timezone, timedelta
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         async with _pool.acquire() as conn:
             r1 = await conn.execute(
