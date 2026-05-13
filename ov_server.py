@@ -500,6 +500,18 @@ async def health():
         "vram_allocated_gb": {
             k: round(v, 2) for k, v in model_manager._vram_allocated.items()
         },
+        "model_vram_estimates": {
+            mid: {
+                "vram_gb": round(
+                    model_manager._vram_measured.get(mid)
+                    or model_manager.model_size_gb(mid),
+                    2,
+                ),
+                "source": "measured" if mid in model_manager._vram_measured else "disk_estimate",
+            }
+            for mid in list(model_manager.loaded_models.keys())
+            + list(model_manager.loaded_vlm_models.keys())
+        },
         "vram_free_gb": (
             round(model_manager.vram_free_gb(), 2)
             if model_manager.vram_free_gb() is not None
