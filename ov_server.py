@@ -842,7 +842,7 @@ async def chat(req: ChatRequest):
             last_user_msg = next(
                 (_text_content(m) for m in reversed(req.messages) if m.role == "user"), ""
             )
-            task_class, score, emb_vec = await loop.run_in_executor(None, router._route_by_embedding, last_user_msg)
+            task_class, score, emb_vec = await router.route_by_embedding(last_user_msg)
             _route_confidence = round(score, 4)
             _route_query_embedding = emb_vec
             strategy = "embedding"

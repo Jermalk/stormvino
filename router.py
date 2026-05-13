@@ -25,9 +25,9 @@ log = logging.getLogger("ov_server")
 # ---------------------------------------------------------------------------
 # Routing state
 # ---------------------------------------------------------------------------
-_task_class_embeddings: "dict[str, np.ndarray] | None" = None  # None=not loaded, {}=failed
+_task_class_embeddings: dict[str, np.ndarray] | None = None  # None=not loaded, {}=failed
 _last_routing_decision: dict | None = None
-_routing_prompt_cache: "dict[tuple[str, str], str]" = {}  # keyed (scope, profile_name)
+_routing_prompt_cache: dict[tuple[str, str], str] = {}  # keyed (scope, profile_name)
 
 # ---------------------------------------------------------------------------
 # Routing constants
@@ -161,7 +161,7 @@ async def _load_embedding_centroids() -> None:
         _task_class_embeddings = {}
 
 
-def _route_by_embedding(query: str) -> "tuple[str, float, list[float] | None]":
+def _route_by_embedding(query: str) -> tuple[str, float, list[float] | None]:
     """Return (task_class, cosine_similarity, embedding_vector) for the best-matching task class.
     Returns ('general', 0.0, None) when embeddings are unavailable."""
     if not _task_class_embeddings:
@@ -187,6 +187,13 @@ def _route_by_embedding(query: str) -> "tuple[str, float, list[float] | None]":
         best_class = "general"
 
     return (best_class, best_score, vec.tolist())
+
+
+async def route_by_embedding(query: str) -> tuple[str, float, list[float] | None]:
+    """Async wrapper — offloads the CPU-bound embedding forward pass to a thread executor
+    so the event loop is not blocked during Stage-2 routing."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _route_by_embedding, query)
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +225,25 @@ def _has_cloud_directive(messages: list) -> bool:
     """True if the last user message contains #ovh or #cloud."""
     last_user = next((_text_content(m) for m in reversed(messages) if m.role == "user"), "")
     return bool(_CLOUD_DIRECTIVE_RE.search(last_user))
+
+
+def _fastest_from(pool: list[dict]) -> dict | None:
+    return next((m for m in pool if m.get("tier") == "fast" and m.get("provider") == "loc"), None)
+
+
+def _balanced_from(pool: list[dict]) -> dict | None:
+    loc_balanced = [m for m in pool if m.get("provider") == "loc" and m.get("tier") == "balanced"]
+    if loc_balanced:
+        return loc_balanced[-1]
+    loc = [m for m in pool if m.get("provider") == "loc"]
+    return loc[-1] if loc else None
+
+
+def _best_from(pool: list[dict]) -> dict | None:
+    best = [m for m in pool if m.get("tier") == "best"]
+    if best:
+        return best[-1]
+    return pool[-1] if pool else None
 
 
 def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
@@ -259,22 +285,6 @@ def _select_model(task_class: str, profile: dict, complexity: float = 0.0,
     pref = pref_override or profile.get("model_preference", "balanced")
     if not pref_override and pref == "balanced" and complexity > 0.65:
         pref = "best"
-
-    def _fastest_from(pool: list[dict]) -> dict | None:
-        return next((m for m in pool if m.get("tier") == "fast" and m.get("provider") == "loc"), None)
-
-    def _balanced_from(pool: list[dict]) -> dict | None:
-        loc_balanced = [m for m in pool if m.get("provider") == "loc" and m.get("tier") == "balanced"]
-        if loc_balanced:
-            return loc_balanced[-1]
-        loc = [m for m in pool if m.get("provider") == "loc"]
-        return loc[-1] if loc else None
-
-    def _best_from(pool: list[dict]) -> dict | None:
-        best = [m for m in pool if m.get("tier") == "best"]
-        if best:
-            return best[-1]
-        return pool[-1] if pool else None
 
     def _pick(pool: list[dict]) -> dict | None:
         if pref == "fastest":
