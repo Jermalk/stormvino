@@ -410,6 +410,24 @@
 **Rejected alternative:** Keep blocked — prevents explicit use of phi-4 which may be desired for comparison testing.
 **Affects:** config.json
 
+### 2026-05-13 — Kaizen: CODE_REVIEW item #14 rejected (legacy compat keys)
+**Decision:** Do not remove `default_model`, `agent_model`, and `routing` block from server_config.py defaults.
+**Rationale:** The review incorrectly described them as dead. `default_model: "qwen3-14b-int4-ov"` and `agent_model: "qwen3-8b-int4-ov"` are live in config.json and imported by model_manager.py. Removing them would break startup.
+**Rejected alternative:** Remove as CODE_REVIEW suggested — would cause a KeyError on startup.
+**Affects:** server_config.py, config.json
+
+### 2026-05-13 — Inference timeout applied to non-streaming paths only
+**Decision:** `asyncio.timeout(INFERENCE_TIMEOUT_SEC)` wraps only VLM non-streaming and LLM non-streaming executor calls. Streaming paths (token-by-token loop) are explicitly excluded.
+**Rationale:** A timeout on a streaming path would kill generation mid-response — the user would receive a truncated stream. Non-streaming paths block until completion; a hung call there blocks the server indefinitely. Configurable via `inference_timeout_sec` in config.json (default 300 s).
+**Rejected alternative:** Apply timeout to all paths — breaks streaming for long generations.
+**Affects:** ov_server.py — non-streaming LLM and VLM branches
+
+### 2026-05-13 — APIKeyMiddleware: opt-in via OV_API_KEY, empty disables auth
+**Decision:** Auth is disabled when `OV_API_KEY` env var is absent or empty. `/health` and `/version` always remain public.
+**Rationale:** Zero-config behaviour preserved for existing LAN clients (Claude Code, AnythingLLM, n8n). Auth activated by setting the env var — no code change or restart required beyond the env var. SSE clients that cannot set headers can pass key via `?api_key=` query param.
+**Rejected alternative:** Auth enabled by default with a bypass flag — would break all existing integrations immediately.
+**Affects:** ov_server.py — APIKeyMiddleware, _OV_API_KEY, _PUBLIC_PATHS
+
 ### 2026-05-11 — OVH proxy streaming: explicit status check + aread() before error log
 **Decision:** Replace `resp.raise_for_status()` inside `client.stream()` with explicit `if resp.status_code >= 400: await resp.aread()` check; yield SSE error event instead of raising HTTPException.
 **Rationale:** `raise_for_status()` inside `client.stream()` leaves the response body unread; accessing `.text` on the raised exception triggers `ResponseNotRead`. Explicit `aread()` drains the body cleanly. Yielding an SSE error event prevents the generator from throwing inside StreamingResponse (which logs an unhandled exception after headers are sent).

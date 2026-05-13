@@ -393,11 +393,21 @@
 
 ---
 
-## NOW
-
+### 2026-05-13 — Session 40 (f07b718)
 **Working on:** Session 39 complete — sidecar, directives, token floor
 **Last commit:** 7f26176 — fix: profile max_new_tokens as floor
 **Next action:** SVP Phase 4 — Postgres time-series charts (plans/20260511_PLAN_svp.md § Phase 4)
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
 **Tests:** all pass — health ok, token floor verified, build clean
+
+---
+
+## NOW
+
+**Working on:** Kaizen sprint — CODE_REVIEW_CONS.md Phases A–F
+**Last commit:** f07b718 — feat: kaizen Phase F — optional API key auth middleware
+**Next action:** SVP Phase 4 — Postgres time-series charts (plans/20260511_PLAN_svp.md § Phase 4)
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) Pre-existing test failure: test_tier_from_task_classes_applied — catalogue tier logic bug, unrelated to this session.
+**Tests:** fail — 1 pre-existing (test_tier_from_task_classes_applied); 175/176 pass; /health ok, server running
