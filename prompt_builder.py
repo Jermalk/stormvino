@@ -7,7 +7,7 @@ import json
 import logging
 import re
 import uuid
-from typing import Any, Dict, List, Optional, Protocol, Union
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 from transformers import AutoTokenizer
@@ -21,16 +21,16 @@ log = logging.getLogger("ov_server")
 # ---------------------------------------------------------------------------
 class ContentPart(BaseModel):
     type: str
-    text: Optional[str] = None
-    image_url: Optional[Dict[str, str]] = None
+    text: str | None = None
+    image_url: dict[str, str] | None = None
 
 
 class Message(BaseModel):
     role: str
-    content: Union[str, List[ContentPart], None] = None
-    tool_call_id: Optional[str] = None
-    tool_calls: Optional[List[Dict[str, Any]]] = None
-    name: Optional[str] = None
+    content: str | list[ContentPart] | None = None
+    tool_call_id: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+    name: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ def _text_content(msg: Message) -> str:
     return msg.content or ""
 
 
-def has_images(messages: List[Message]) -> bool:
+def has_images(messages: list[Message]) -> bool:
     return any(
         isinstance(m.content, list) and any(p.type == "image_url" for p in m.content)
         for m in messages
@@ -64,7 +64,7 @@ def _vlm_content(m: "Message", template_is_simple: bool) -> Any:
     if not isinstance(m.content, list):
         return m.content or ""
     if template_is_simple:
-        parts: List[str] = []
+        parts: list[str] = []
         for p in m.content:
             if p.type == "image_url":
                 parts.append("<image>")
@@ -72,7 +72,7 @@ def _vlm_content(m: "Message", template_is_simple: bool) -> Any:
                 parts.append(p.text)
         return "\n".join(parts)
     # Rich template — pass typed content blocks
-    result: List[Dict[str, Any]] = []
+    result: list[dict[str, Any]] = []
     for p in m.content:
         if p.type == "image_url":
             result.append({"type": "image"})
@@ -81,13 +81,13 @@ def _vlm_content(m: "Message", template_is_simple: bool) -> Any:
     return result
 
 
-def build_vlm_prompt(messages: List[Message], tokenizer: AutoTokenizer) -> str:
+def build_vlm_prompt(messages: list[Message], tokenizer: AutoTokenizer) -> str:
     chat_tmpl = getattr(tokenizer, "chat_template", "") or ""
     # Templates that do plain string concat cannot handle list content
     template_is_simple = ("message['content']" in chat_tmpl
                           or 'message["content"]' in chat_tmpl
                           or not chat_tmpl)
-    msg_dicts: List[Dict[str, Any]] = []
+    msg_dicts: list[dict[str, Any]] = []
     has_system = any(m.role == "system" for m in messages)
     if not has_system:
         msg_dicts.append({"role": "system", "content": "You are a helpful assistant."})
@@ -102,17 +102,17 @@ def build_vlm_prompt(messages: List[Message], tokenizer: AutoTokenizer) -> str:
 # Shared msg_dict builder — common to DefaultAdapter and the no-tools path
 # ---------------------------------------------------------------------------
 def _build_msg_dicts(
-    messages: List[Message],
+    messages: list[Message],
     thinking: bool,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     suffix = " /no_think" if not thinking else ""
-    msg_dicts: List[Dict[str, Any]] = []
+    msg_dicts: list[dict[str, Any]] = []
     has_system = any(m.role == "system" for m in messages)
     if not has_system:
         msg_dicts.append({"role": "system", "content": f"You are a helpful assistant.{suffix}"})
     for m in messages:
         text = _text_content(m)
-        d: Dict[str, Any] = {"role": m.role, "content": text}
+        d: dict[str, Any] = {"role": m.role, "content": text}
         if m.role == "system" and not thinking and not text.endswith("/no_think"):
             d["content"] = text.rstrip() + suffix
         if m.tool_call_id:
@@ -141,15 +141,15 @@ def _build_msg_dicts(
 # ---------------------------------------------------------------------------
 class ModelFamilyAdapter(Protocol):
     max_context_tokens: int
-    sampling_defaults: Dict[str, float]
+    sampling_defaults: dict[str, float]
 
-    def validate_messages(self, messages: List[Message]) -> None: ...
+    def validate_messages(self, messages: list[Message]) -> None: ...
 
     def build_prompt(
         self,
-        messages: List[Message],
+        messages: list[Message],
         tokenizer: AutoTokenizer,
-        tools: List[Dict[str, Any]],
+        tools: list[dict[str, Any]],
         thinking: bool,
     ) -> str: ...
 
@@ -170,21 +170,21 @@ class DefaultAdapter:
     """
 
     max_context_tokens: int = 32_768
-    sampling_defaults: Dict[str, float] = {
+    sampling_defaults: dict[str, float] = {
         "temperature": 0.7,
         "top_p": 0.8,
         "repetition_penalty": 1.1,
     }
 
-    def validate_messages(self, messages: List[Message]) -> None:
+    def validate_messages(self, messages: list[Message]) -> None:
         if not messages:
             raise ValueError("messages list is empty")
 
     def build_prompt(
         self,
-        messages: List[Message],
+        messages: list[Message],
         tokenizer: AutoTokenizer,
-        tools: List[Dict[str, Any]],
+        tools: list[dict[str, Any]],
         thinking: bool,
     ) -> str:
         return tokenizer.apply_chat_template(
@@ -227,13 +227,13 @@ class MistralAdapter:
     """
 
     max_context_tokens: int = 32_768
-    sampling_defaults: Dict[str, float] = {
+    sampling_defaults: dict[str, float] = {
         "temperature": 0.7,
         "top_p": 1.0,
         "repetition_penalty": 1.0,
     }
 
-    def validate_messages(self, messages: List[Message]) -> None:
+    def validate_messages(self, messages: list[Message]) -> None:
         if not messages:
             raise ValueError("messages list is empty")
         system_indices = [i for i, m in enumerate(messages) if m.role == "system"]
@@ -250,9 +250,9 @@ class MistralAdapter:
 
     def build_prompt(
         self,
-        messages: List[Message],
+        messages: list[Message],
         tokenizer: AutoTokenizer,
-        tools: List[Dict[str, Any]],
+        tools: list[dict[str, Any]],
         thinking: bool,  # Mistral has no thinking mode; kept for interface parity
     ) -> str:
         bos = tokenizer.bos_token or "<s>"
@@ -332,21 +332,21 @@ class InternVLAdapter:
     """
 
     max_context_tokens: int = 8_192
-    sampling_defaults: Dict[str, float] = {
+    sampling_defaults: dict[str, float] = {
         "temperature": 0.9,
         "top_p": 0.95,
         "repetition_penalty": 1.0,
     }
 
-    def validate_messages(self, messages: List[Message]) -> None:
+    def validate_messages(self, messages: list[Message]) -> None:
         if not messages:
             raise ValueError("messages list is empty")
 
     def build_prompt(
         self,
-        messages: List[Message],
+        messages: list[Message],
         tokenizer: AutoTokenizer,
-        tools: List[Dict[str, Any]],
+        tools: list[dict[str, Any]],
         thinking: bool,
     ) -> str:
         return _DEFAULT_ADAPTER.build_prompt(messages, tokenizer, tools, thinking)
@@ -382,9 +382,9 @@ def get_adapter(tokenizer: AutoTokenizer) -> DefaultAdapter | MistralAdapter | I
 # Public prompt builder
 # ---------------------------------------------------------------------------
 def build_prompt(
-    messages: List[Message],
+    messages: list[Message],
     tokenizer: AutoTokenizer,
-    tools: Optional[List[Dict[str, Any]]] = None,
+    tools: list[dict[str, Any]] | None = None,
     thinking: bool = True,
 ) -> str:
     if tools:
@@ -427,7 +427,7 @@ def _extract_agent_json(text: str) -> str:
 # ---------------------------------------------------------------------------
 def parse_tool_calls(
     text: str,
-    tokenizer: Optional[AutoTokenizer] = None,
+    tokenizer: AutoTokenizer | None = None,
 ) -> tuple[list[dict] | None, str]:
     if tokenizer is not None:
         return get_adapter(tokenizer).parse_tool_calls(text)
@@ -478,7 +478,7 @@ def extract_thinking(raw_text: str):
     return None, raw_text.strip()
 
 
-def format_thinking(thinking: Optional[str], answer: str) -> str:
+def format_thinking(thinking: str | None, answer: str) -> str:
     if not thinking:
         return answer
     lines = thinking.replace("\n", "\n> ")

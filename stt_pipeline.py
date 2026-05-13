@@ -10,7 +10,7 @@ import io
 import logging
 import time
 from pathlib import Path
-from typing import Optional
+
 
 import numpy as np
 
@@ -86,7 +86,7 @@ def _decode_audio_bytes(data: bytes, filename: str = "") -> np.ndarray:
 async def transcribe(
     audio_data: bytes,
     filename: str = "audio",
-    language: Optional[str] = None,
+    language: str | None = None,
     task: str = "transcribe",
     model_dir: str = "",
     device: str = "GPU.1",

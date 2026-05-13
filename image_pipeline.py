@@ -11,7 +11,7 @@ import io
 import logging
 import time
 from pathlib import Path
-from typing import Optional
+
 
 import numpy as np
 
@@ -92,7 +92,7 @@ async def generate_images(
     width: int = 1024,
     height: int = 1024,
     num_inference_steps: int = 20,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     num_images: int = 1,
     model_dir: str = "",
     device: str = "GPU.1",

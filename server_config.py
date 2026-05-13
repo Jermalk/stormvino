@@ -9,7 +9,6 @@ import logging
 import math
 import subprocess
 from pathlib import Path
-from typing import Dict
 
 import openvino_genai as ov_genai
 
@@ -156,8 +155,8 @@ log.info(f"Server version {SERVER_VERSION} commit {_GIT_COMMIT}")
 # A directory is an LLM if it contains openvino_model.xml AND
 # openvino_detokenizer.xml (distinguishes LLMs from embedding models).
 # ---------------------------------------------------------------------------
-def _discover_models(models_dir: Path) -> Dict[str, str]:
-    found: Dict[str, str] = {}
+def _discover_models(models_dir: Path) -> dict[str, str]:
+    found: dict[str, str] = {}
     if not models_dir.exists():
         log.warning(f"Models directory {models_dir} does not exist")
         return found
@@ -170,9 +169,9 @@ def _discover_models(models_dir: Path) -> Dict[str, str]:
     return found
 
 
-def _discover_vlm_models(models_dir: Path) -> Dict[str, str]:
+def _discover_vlm_models(models_dir: Path) -> dict[str, str]:
     """VLM directories are distinguished by openvino_language_model.xml (split architecture)."""
-    found: Dict[str, str] = {}
+    found: dict[str, str] = {}
     if not models_dir.exists():
         return found
     for d in sorted(models_dir.iterdir()):
@@ -273,7 +272,7 @@ MAX_RAM_PERCENT        = _cfg["max_ram_percent"]
 MAX_NEW_TOKENS_DEFAULT = _cfg["max_new_tokens_default"]
 MAX_NEW_TOKENS_AGENT   = _cfg["max_new_tokens_agent"]
 VRAM_HEADROOM_GB       = _cfg["vram_headroom_gb"]
-MODEL_ALIASES: Dict[str, str] = _cfg["model_aliases"]
+MODEL_ALIASES: dict[str, str] = _cfg["model_aliases"]
 VLM_MAX_IMAGE_TURNS:   int = int(_cfg["vlm_max_image_turns"])
 VLM_MAX_IMAGE_SIDE_PX: int = int(_cfg["vlm_max_image_side_px"])
 

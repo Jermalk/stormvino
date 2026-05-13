@@ -10,7 +10,6 @@ import logging
 import time
 from functools import partial
 from pathlib import Path
-from typing import Dict, Optional, Tuple
 
 import psutil
 import openvino_genai as ov_genai
@@ -34,30 +33,30 @@ log = logging.getLogger("ov_server")
 # ---------------------------------------------------------------------------
 # Shared state
 # ---------------------------------------------------------------------------
-loaded_models: Dict[str, ov_genai.LLMPipeline] = {}
-loaded_tokenizers: Dict[str, AutoTokenizer] = {}
-model_last_used: Dict[str, float] = {}
+loaded_models: dict[str, ov_genai.LLMPipeline] = {}
+loaded_tokenizers: dict[str, AutoTokenizer] = {}
+model_last_used: dict[str, float] = {}
 emb_model = None
 emb_tokenizer = None
 _model_lock = asyncio.Lock()
-_infer_locks: Dict[str, asyncio.Lock] = {}
+_infer_locks: dict[str, asyncio.Lock] = {}
 _emb_lock = asyncio.Lock()
 _loading_model_id: str | None = None
 
-loaded_vlm_models: Dict[str, ov_genai.VLMPipeline] = {}
-loaded_vlm_tokenizers: Dict[str, AutoTokenizer] = {}
+loaded_vlm_models: dict[str, ov_genai.VLMPipeline] = {}
+loaded_vlm_tokenizers: dict[str, AutoTokenizer] = {}
 
 # VRAM tracking — total queried once at startup; per-model allocation maintained internally.
 # Using internal accounting because a fresh ov.Core() sees zero allocations from other instances.
-_TOTAL_VRAM_GB: Optional[float] = None
-_vram_allocated: Dict[str, float] = {}   # model_id → GB currently on GPU (cleared on eviction)
-_vram_measured: Dict[str, float] = {}    # model_id → GB at last load (persists across evictions)
+_TOTAL_VRAM_GB: float | None = None
+_vram_allocated: dict[str, float] = {}   # model_id → GB currently on GPU (cleared on eviction)
+_vram_measured: dict[str, float] = {}    # model_id → GB at last load (persists across evictions)
 _vlm_lock = asyncio.Lock()
 
-_vlm_infer_locks: Dict[str, asyncio.Lock] = {}
+_vlm_infer_locks: dict[str, asyncio.Lock] = {}
 
 _assessor_pipe: "ov_genai.LLMPipeline | None" = None
-_assessor_tokenizer: Optional[AutoTokenizer] = None
+_assessor_tokenizer: AutoTokenizer | None = None
 _assessor_lock = asyncio.Lock()
 
 
@@ -161,7 +160,7 @@ def can_coexist(llm_id: str, vlm_id: str) -> bool:
     ) <= _TOTAL_VRAM_GB
 
 
-def vram_free_gb() -> Optional[float]:
+def vram_free_gb() -> float | None:
     """Estimated free VRAM from internal allocation tracking (not a live GPU query).
     A fresh ov.Core() always reports zero usage for allocations made by other instances,
     so we maintain our own accounting instead."""
@@ -399,7 +398,7 @@ async def get_embedding_model():
     return emb_model, emb_tokenizer
 
 
-async def get_vlm(model_id: str) -> Tuple[ov_genai.VLMPipeline, AutoTokenizer]:
+async def get_vlm(model_id: str) -> tuple[ov_genai.VLMPipeline, AutoTokenizer]:
     if model_id in MODEL_ALIASES:
         model_id = MODEL_ALIASES[model_id]
     if not model_id or model_id not in AVAILABLE_VLM_MODELS:
