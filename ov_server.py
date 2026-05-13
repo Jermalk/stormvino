@@ -87,6 +87,29 @@ class DebugLoggingMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+_OV_API_KEY: str = os.environ.get("OV_API_KEY", "")
+_PUBLIC_PATHS: frozenset[str] = frozenset({"/health", "/version"})
+
+
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """Optional static API key auth. Disabled when OV_API_KEY env var is not set.
+    Health and version endpoints are always public (load balancer / monitor use).
+    Accepts key via Authorization: Bearer <key> header or ?api_key= query param
+    (query param needed for SSE clients that cannot set request headers)."""
+
+    async def dispatch(self, request: Request, call_next):
+        if not _OV_API_KEY or request.url.path in _PUBLIC_PATHS:
+            return await call_next(request)
+        raw = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        raw = raw or request.query_params.get("api_key", "")
+        if raw != _OV_API_KEY:
+            return JSONResponse(
+                {"error": {"message": "Invalid API key", "type": "invalid_request_error"}},
+                status_code=401,
+            )
+        return await call_next(request)
+
+
 app = FastAPI()
 
 from server_config import (
@@ -1750,6 +1773,7 @@ if __name__ == "__main__":
         debug_logging = True
         log.info("Debug logging enabled (--debug flag)")
     app.add_middleware(DebugLoggingMiddleware)
+    app.add_middleware(APIKeyMiddleware)
     app.add_middleware(
         CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
     )
