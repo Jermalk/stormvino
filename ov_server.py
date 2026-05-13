@@ -1744,8 +1744,11 @@ async def monitor_metrics(metric: str = "tok_per_sec", minutes: int = 60):
     if metric not in db.VALID_CHART_METRICS:
         raise HTTPException(status_code=400, detail=f"Unknown metric '{metric}'")
     minutes = max(5, min(minutes, 1440))
-    ts, values = await db.query_metrics_series(metric, minutes)
-    return {"ts": ts, "values": values, "metric": metric, "minutes": minutes}
+    ts, values, model_counts = await db.query_metrics_series(metric, minutes)
+    result: dict = {"ts": ts, "values": values, "metric": metric, "minutes": minutes}
+    if model_counts is not None:
+        result["model_counts"] = model_counts
+    return result
 
 
 @app.get("/monitor/api/model-usage")
@@ -1753,6 +1756,12 @@ async def monitor_model_usage(hours: int = 24):
     """Per-model request + token summary from Postgres over the last N hours."""
     hours = max(1, min(hours, 168))
     return await db.query_model_usage(hours)
+
+
+@app.get("/monitor/api/vram-profiles")
+async def monitor_vram_profiles():
+    """Full model_vram_profiles table: model × kv_cache_gb → measured VRAM."""
+    return await db.query_vram_profiles()
 
 
 if __name__ == "__main__":

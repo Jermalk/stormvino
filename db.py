@@ -361,16 +361,32 @@ VALID_CHART_METRICS: frozenset[str] = frozenset(_METRIC_SQL)
 async def query_metrics_series(
     metric: str,
     minutes: int = 60,
-) -> tuple[list[int], list[float]]:
-    """Return (unix_timestamps, float_values) for uPlot.
+) -> tuple[list[int], list[float], list[float] | None]:
+    """Return (unix_timestamps, float_values, optional_model_counts) for uPlot.
 
     Queries inference_events or system_snapshots depending on metric.
     metric must be in VALID_CHART_METRICS (allowlist via _METRIC_SQL keys).
+    For vram_used_gb, also returns loaded-model count as a stepped overlay series.
     """
     if _pool is None or metric not in _METRIC_SQL:
-        return [], []
+        return [], [], None
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     table, col = _METRIC_SQL[metric]
+    if metric == "vram_used_gb":
+        try:
+            async with _pool.acquire() as conn:
+                rows = await conn.fetch(
+                    f"SELECT EXTRACT(EPOCH FROM ts)::bigint AS t, "
+                    f"{col}::double precision AS v, "
+                    f"COALESCE(ARRAY_LENGTH(loaded_models, 1), 0)::double precision AS cnt "
+                    f"FROM {table} WHERE ts > $1 AND {col} IS NOT NULL ORDER BY ts",
+                    cutoff,
+                )
+            ts = [r["t"] for r in rows]
+            return ts, [r["v"] for r in rows], [r["cnt"] for r in rows]
+        except Exception as exc:
+            log.warning(f"DB query_metrics_series(vram_used_gb) failed: {exc}")
+            return [], [], None
     try:
         async with _pool.acquire() as conn:
             rows = await conn.fetch(
@@ -378,10 +394,35 @@ async def query_metrics_series(
                 f"FROM {table} WHERE ts > $1 AND {col} IS NOT NULL ORDER BY ts",
                 cutoff,
             )
-        return [r["t"] for r in rows], [r["v"] for r in rows]
+        return [r["t"] for r in rows], [r["v"] for r in rows], None
     except Exception as exc:
         log.warning(f"DB query_metrics_series({metric}) failed: {exc}")
-        return [], []
+        return [], [], None
+
+
+async def query_vram_profiles() -> list[dict[str, Any]]:
+    """Full model_vram_profiles table: model × kv_cache_gb → measured VRAM."""
+    if _pool is None:
+        return []
+    try:
+        async with _pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT model_id, kv_cache_gb, vram_gb, load_time_s, measured_at "
+                "FROM model_vram_profiles ORDER BY model_id, kv_cache_gb"
+            )
+        return [
+            {
+                "model_id": r["model_id"],
+                "kv_cache_gb": r["kv_cache_gb"],
+                "vram_gb": round(float(r["vram_gb"]), 2),
+                "load_time_s": round(float(r["load_time_s"]), 1) if r["load_time_s"] is not None else None,
+                "measured_at": r["measured_at"].isoformat() if r["measured_at"] else None,
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        log.warning(f"DB query_vram_profiles failed: {exc}")
+        return []
 
 
 async def query_model_usage(hours: int = 24) -> list[dict[str, Any]]:

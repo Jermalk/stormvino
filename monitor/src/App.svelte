@@ -7,9 +7,10 @@
   import ProfilesPanel from './lib/ProfilesPanel.svelte'
   import ProfilerPanel from './lib/ProfilerPanel.svelte'
   import SystemPanel   from './lib/SystemPanel.svelte'
-  import Charts          from './lib/Charts.svelte'
-  import ModelUsage      from './lib/ModelUsage.svelte'
-  import CataloguePanel  from './lib/CataloguePanel.svelte'
+  import Charts             from './lib/Charts.svelte'
+  import ModelUsage         from './lib/ModelUsage.svelte'
+  import CataloguePanel     from './lib/CataloguePanel.svelte'
+  import VramProfilesPanel  from './lib/VramProfilesPanel.svelte'
 
   // Sidecar is the primary data source: health + system + live VRAM.
   let metrics  = $state(null)
@@ -79,9 +80,10 @@
     <CataloguePanel {profiler} />
   </div>
 
-  <!-- Row 5: History chart (100%) -->
-  <div class="row full">
-    <Charts />
+  <!-- Row 5: VRAM profiles (30%) · History chart (70%) -->
+  <div class="row bi">
+    <div class="cell"><VramProfilesPanel /></div>
+    <div class="cell"><Charts /></div>
   </div>
 </div>
 
@@ -124,6 +126,7 @@
   /* Rows: border-top separates every row from the one above */
   .row { display: grid; min-width: 0; border-top: 1px solid var(--border); }
   .tri  { grid-template-columns: 4fr 3fr 3fr; }
+  .bi   { grid-template-columns: 3fr 7fr; }
   .full { background: var(--card); }
 
   /* Cells: right border on all but the last in a row */
@@ -132,7 +135,7 @@
 
   /* Responsive: collapse to 1 column below 900px */
   @media (max-width: 900px) {
-    .tri { grid-template-columns: 1fr; }
+    .tri, .bi { grid-template-columns: 1fr; }
     .cell { border-right: none; border-bottom: 1px solid var(--border); }
     .cell:last-child { border-bottom: none; }
   }

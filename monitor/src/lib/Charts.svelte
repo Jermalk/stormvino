@@ -37,32 +37,62 @@
       if (plot) { plot.destroy(); plot = null }
       if (!data.ts?.length) return
 
+      const hasDual = data.model_counts?.length > 0
+      const uData   = hasDual
+        ? [data.ts, data.values, data.model_counts]
+        : [data.ts, data.values]
+
       const opts = {
         width:  container.clientWidth || 600,
         height: 180,
-        scales: { x: { time: true }, y: { auto: true } },
-        series: [
-          {},
-          {
-            label:  activeMetric.unit,
-            stroke: activeMetric.color,
-            width:  1.5,
-            fill:   activeMetric.color + '18',
-            points: { show: data.ts.length < 60 },
-          },
-        ],
-        axes: [
-          { stroke: '#ffffff40', ticks: { stroke: '#ffffff15' }, grid: { stroke: '#ffffff08' } },
-          {
-            size:   52,
-            stroke: '#ffffff40',
-            ticks:  { stroke: '#ffffff15' },
-            grid:   { stroke: '#ffffff08' },
-          },
-        ],
+        scales: hasDual
+          ? { x: { time: true }, y: { auto: true }, y2: { auto: true } }
+          : { x: { time: true }, y: { auto: true } },
+        series: hasDual
+          ? [
+              {},
+              {
+                label:  activeMetric.unit,
+                stroke: activeMetric.color,
+                width:  1.5,
+                fill:   activeMetric.color + '18',
+                scale:  'y',
+                points: { show: false },
+              },
+              {
+                label:  'models',
+                stroke: '#4ef1a070',
+                width:  1,
+                scale:  'y2',
+                paths:  uPlot.paths.stepped({ align: -1 }),
+                points: { show: false },
+              },
+            ]
+          : [
+              {},
+              {
+                label:  activeMetric.unit,
+                stroke: activeMetric.color,
+                width:  1.5,
+                fill:   activeMetric.color + '18',
+                points: { show: data.ts.length < 60 },
+              },
+            ],
+        axes: hasDual
+          ? [
+              { stroke: '#ffffff40', ticks: { stroke: '#ffffff15' }, grid: { stroke: '#ffffff08' } },
+              { size: 52, stroke: '#ffffff40', ticks: { stroke: '#ffffff15' }, grid: { stroke: '#ffffff08' } },
+              { scale: 'y2', side: 1, size: 28, stroke: '#4ef1a060',
+                ticks: { show: false }, grid: { show: false },
+                values: (_, v) => v != null ? String(Math.round(v)) : '' },
+            ]
+          : [
+              { stroke: '#ffffff40', ticks: { stroke: '#ffffff15' }, grid: { stroke: '#ffffff08' } },
+              { size: 52, stroke: '#ffffff40', ticks: { stroke: '#ffffff15' }, grid: { stroke: '#ffffff08' } },
+            ],
         cursor: { stroke: '#ffffff30', width: 1 },
       }
-      plot = new uPlot(opts, [data.ts, data.values], container)
+      plot = new uPlot(opts, uData, container)
     } catch {
       loading = false
     }

@@ -70,3 +70,9 @@ export async function fetchModels() {
   const data = await r.json()
   return data.data ?? []
 }
+
+export async function fetchVramProfiles() {
+  const r = await fetch(`${BASE}/monitor/api/vram-profiles`)
+  if (!r.ok) throw new Error(`/monitor/api/vram-profiles ${r.status}`)
+  return r.json()
+}
