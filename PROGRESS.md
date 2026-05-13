@@ -413,9 +413,9 @@
 
 ---
 
-### 2026-05-14 — Session 42 (TBD)
+### 2026-05-14 — Session 42 (da3c82d)
 **Working on:** test fix, SVP Phase 5 responsive + GPU bars, Charts race fix, infergate gap analysis
-**Last commit:** 5aa60d2 — docs: session wrap — SVP Phase 4, unified ModelCataloguePanel, cleanup
+**Last commit:** da3c82d — docs: session wrap — test fix, SVP Phase 5 responsive+GPU bars, Charts race fix, infergate gap analysis
 **Next action:** free-form — no outstanding plan items; infergate improvements in separate thread
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
@@ -426,7 +426,7 @@
 ## NOW
 
 **Working on:** Session 42 wrap — test fix, SVP Phase 5, infergate gap doc
-**Last commit:** TBD
+**Last commit:** da3c82d — docs: session wrap — test fix, SVP Phase 5 responsive+GPU bars, Charts race fix, infergate gap analysis
 **Next action:** free-form — infergate improvements tracked in plans/20260514_infergate_gaps.md
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
