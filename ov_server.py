@@ -143,6 +143,10 @@ _active_profile: str = _cfg.get("active_profile", "fast")
 _profile_switching: bool = False
 _profile_lock = asyncio.Lock()
 
+# Inference timeout — kills hung openvino_genai calls (corrupted model, bad gen config).
+# Applied to non-streaming paths only; streaming token loops run until completion.
+INFERENCE_TIMEOUT_SEC: int = _cfg.get("inference_timeout_sec", 300)
+
 
 # ---------------------------------------------------------------------------
 # Content helpers — Message.content is str or list of parts (vision API)
@@ -817,7 +821,12 @@ async def _chat_vlm(req: ChatRequest):
                     prompt, images=images, generation_config=gen_config
                 )
 
-            raw = await loop.run_in_executor(None, _gen)
+            try:
+                async with asyncio.timeout(INFERENCE_TIMEOUT_SEC):
+                    raw = await loop.run_in_executor(None, _gen)
+            except TimeoutError:
+                log.error(f"VLM inference timeout after {INFERENCE_TIMEOUT_SEC}s — model: {model_id}")
+                raise HTTPException(status_code=504, detail="Inference timeout")
         elapsed = time.time() - start
 
         raw_text = decode_result(raw)
@@ -1452,9 +1461,14 @@ async def chat(req: ChatRequest):
         start = time.time()
         loop = asyncio.get_running_loop()
         async with model_manager._infer_lock(model_id):
-            raw = await loop.run_in_executor(
-                None, partial(pipe.generate, prompt, gen_config)
-            )
+            try:
+                async with asyncio.timeout(INFERENCE_TIMEOUT_SEC):
+                    raw = await loop.run_in_executor(
+                        None, partial(pipe.generate, prompt, gen_config)
+                    )
+            except TimeoutError:
+                log.error(f"LLM inference timeout after {INFERENCE_TIMEOUT_SEC}s — model: {model_id}")
+                raise HTTPException(status_code=504, detail="Inference timeout")
         elapsed = time.time() - start
 
         # FIX: safely extract string from whatever generate() returns
