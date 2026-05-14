@@ -483,10 +483,20 @@
 
 ---
 
+### 2026-05-14 — Session 51 (c9e3711)
+**Working on:** README rebranding — Stormvino title, Origin section (Shangri-Lab link), Foreword & credits (user-authored)
+**Last commit:** c9e3711 — docs: README — Origin section linking Stormvino back to Shangri-Lab
+**Next action:** write round_07 feedback or start next feature; no outstanding plan items
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
+**Tests:** pass — 159/159
+
+---
+
 ## NOW
 
-**Working on:** session wrap
-**Last commit:** 854f121 — feat: infergate 0.2.0 — decide(force_tier=) replaces decide→reselect workaround
+**Working on:** session wrap + GitHub push
+**Last commit:** c9e3711 — docs: README — Origin section linking Stormvino back to Shangri-Lab
 **Next action:** write round_07 feedback or start next feature; no outstanding plan items
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.

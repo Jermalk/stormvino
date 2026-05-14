@@ -3,6 +3,21 @@
 OpenVINO-backed OpenAI-compatible API server. Exposes `/v1/chat/completions`, `/v1/embeddings`, and `/v1/models` on port `11435`.
 
 ---
+## Foreword and credits
+
+I  had never dreamed of writing a local LLM server — not in Python, not in anything.
+I know some good, simple, proven existing solutions like Ollama and I use them. I like simplicity — until I don't.
+After getting involved with running LLMs locally, I was struggling to understand how to use them effectively and efficiently.
+The story behind that you can find in the Shangri-lab repository.
+This repo is an already much more mature version of a lightweight, OpenAI API-compatible, Python/OpenVINO-based LLM server.
+I want to thank my "Silicon-Bit-Brain" and employee — Claude Code.
+Without you this work wouldn't happen.
+Without me this work wouldn't happen either.
+That is a strong example of 1+1=3 (or even 5).
+Some of you will call it "vibe coding" — if you think so,
+I encourage you to try and point me to your repo.
+"Work your butts off" — like A. Schwarzenegger used to say.
+---
 
 ## Origin
 
