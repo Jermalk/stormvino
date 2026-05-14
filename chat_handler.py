@@ -525,7 +525,7 @@ async def chat(req: ChatRequest):
 
         assert app_state.ig_router is not None, "infergate router not initialised — startup error"
         _ig_req = _IGInferRequest(messages=_ig_messages, tools=_ig_tools)
-        decision = await app_state.ig_router.decide(_ig_req)
+        decision = await app_state.ig_router.decide(_ig_req, trace=app_state.debug_logging)
 
         task_class = decision.task_class
         model_id = decision.model_id
@@ -534,6 +534,7 @@ async def chat(req: ChatRequest):
         _route_strategy = strategy
         _route_confidence = decision.confidence
         _route_query_embedding = decision.embedding
+        _estimated_tokens = decision.estimated_tokens
 
         _ovh_configured = bool(_cfg.get("routing", {}).get("backends", {}).get("ovh"))
         _cloud_directive = _ovh_configured and _ig_signals.has_cloud_directive(_ig_messages)
@@ -561,12 +562,25 @@ async def chat(req: ChatRequest):
             "strategy": strategy,
             "cloud_directive": _cloud_directive,
             "task_directive": _task_directive,
+            "estimated_tokens": _estimated_tokens,
         }
         log.info(
             f"[infergate] {strategy} → task_class='{task_class}' model='{model_id}'"
+            f" tokens≈{_estimated_tokens}"
             + (f" [#{_task_directive}]" if _task_directive else "")
             + (" [#cloud]" if _cloud_directive else "")
         )
+        if app_state.debug_logging and decision.trace:
+            _tr = decision.trace
+            _cache = {True: "hit", False: "miss", None: "n/a"}[_tr.cache_hit]
+            _elim = ", ".join(
+                f"{c.model_id}({c.reason})" for c in _tr.eliminated
+            ) or "none"
+            log.debug(
+                f"[infergate:trace] scope_source={_tr.scope_source}"
+                f" embed_ms={_tr.embedding_ms} cache={_cache}"
+                f" eliminated=[{_elim}]"
+            )
 
         if model_entry.get("provider") != "loc":
             backends = _cfg.get("routing", {}).get("backends", {})
