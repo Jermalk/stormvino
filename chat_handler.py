@@ -575,6 +575,7 @@ async def chat(req: ChatRequest):
         }
 
         _task_directive = decision.task_directive
+        _estimated_cost = decision.estimated_cost_usd
         routing_decision = {
             "task_class": task_class,
             "model": model_id,
@@ -582,10 +583,12 @@ async def chat(req: ChatRequest):
             "cloud_directive": _cloud_directive,
             "task_directive": _task_directive,
             "estimated_tokens": _estimated_tokens,
+            "estimated_cost_usd": _estimated_cost,
         }
         log.info(
             f"[infergate] {strategy} → task_class='{task_class}' model='{model_id}'"
             f" tokens≈{_estimated_tokens}"
+            + (f" ${_estimated_cost:.6f}" if _estimated_cost else "")
             + (f" [#{_task_directive}]" if _task_directive else "")
             + (" [#cloud]" if _cloud_directive else "")
         )

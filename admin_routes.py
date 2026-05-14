@@ -177,6 +177,9 @@ async def health():
         "loaded_models": list(model_manager.loaded_models.keys()),
         "loaded_vlm_models": list(model_manager.loaded_vlm_models.keys()),
         "embedding_loaded": model_manager.emb_model is not None,
+        "embedding_cache": (
+            app_state.ig_router.cache_stats() if app_state.ig_router else None
+        ),
         "assessor_loaded": model_manager._assessor_pipe is not None,
         "image_model_loaded": image_pipeline.is_loaded(),
         "image_model_id": image_pipeline.loaded_model_id(),
