@@ -4,4 +4,4 @@
 > Format: bullet points, max 5 lines per topic, no prose.
 
 ## Carried over:
-Session 49: infergate upgraded 0.1.4→0.1.8→0.1.9. Three wiring changes: estimated_tokens + trace-in-debug-mode (5c234a1), profile tier routing bug fix via reselect() workaround (c5711b5), cache_stats in /health + estimated_cost_usd (bc6c7e7). Rounds 5+6 feedback written; dev shipped 0.1.9 (all three P1/P2 items) and 0.2.0 (decide(force_tier=)). 0.2.0 not yet on PyPI. 27-test single-threaded curl suite: all pass, no crashes. Concurrent test found emb InferRequest collision (not fixed — user has plans). Next: upgrade to 0.2.0 when it lands, remove reselect workaround in chat_handler.py.
+Session 50: infergate SIGNAL.md read (RELEASE READY, 0.2.0 on PyPI). Upgraded infergate 0.1.9→0.2.0 in /home/jerzy/ov_env. Removed decide→reselect workaround (commit c5711b5) from chat_handler.py — replaced with single decide(force_tier=_prof_pref) call. GitHub remote added: git@github.com:Jermalk/stormvino.git using infergate_github.key; master pushed. 159/159 tests pass.

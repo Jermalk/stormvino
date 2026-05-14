@@ -473,11 +473,21 @@
 
 ---
 
+### 2026-05-14 — Session 50 (854f121)
+**Working on:** infergate 0.2.0 upgrade — signal read, lib upgraded, workaround removed, GitHub remote added
+**Last commit:** 854f121 — feat: infergate 0.2.0 — decide(force_tier=) replaces decide→reselect workaround
+**Next action:** write round_07 feedback or start next feature; no outstanding plan items
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
+**Tests:** pass — 159/159
+
+---
+
 ## NOW
 
-**Working on:** infergate 0.2.0 upgrade — decide(force_tier=) replaces decide→reselect workaround
-**Last commit:** bc6c7e7 — feat: infergate 0.1.9 — cache_stats in /health + estimated_cost_usd in routing
-**Next action:** `pip install --upgrade infergate` when 0.2.0 lands; then replace profile-tier reselect block in chat_handler.py with single decide(force_tier=_prof_pref) call
-**Blocked on:** infergate 0.2.0 not yet on PyPI (addressed_06_v0.2.0.md confirms it shipped; PyPI lag)
+**Working on:** session wrap
+**Last commit:** 854f121 — feat: infergate 0.2.0 — decide(force_tier=) replaces decide→reselect workaround
+**Next action:** write round_07 feedback or start next feature; no outstanding plan items
+**Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
 **Tests:** pass — 159/159
