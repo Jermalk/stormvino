@@ -11,9 +11,8 @@ from infergate.types import InferRequest
 class OVServerBackend:
     """Local OpenVINO inference backend. Reads model state from ov_server globals."""
 
-    @property
-    def is_local(self) -> bool:
-        return True
+    is_local: bool = True
+    routing_only: bool = True  # Router.decide() is the exit point; chat() is never called.
 
     def name(self) -> str:
         return "ov_server"
