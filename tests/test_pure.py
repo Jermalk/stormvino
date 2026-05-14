@@ -15,18 +15,18 @@ import numpy as np
 import pytest
 
 import ov_server
+import chat_handler
 import catalogue
 import router
 import model_manager
 import server_config
 
-from ov_server import (
+from ov_server import _VALID_SCOPES
+from chat_handler import _limit_image_history, _pick_backend_name
+from prompt_builder import (
     ContentPart,
     Message,
     ThinkStreamHandler,
-    _VALID_SCOPES,
-    _limit_image_history,
-    _pick_backend_name,
     _text_content,
     _extract_agent_json,
     decode_result,
@@ -352,20 +352,20 @@ def _txt_msg(text: str) -> Message:
 class TestLimitImageHistory:
     def test_no_images_unchanged(self):
         msgs = [_txt_msg("a"), _txt_msg("b")]
-        with patch.object(ov_server, "VLM_MAX_IMAGE_TURNS", 1):
+        with patch.object(chat_handler, "VLM_MAX_IMAGE_TURNS", 1):
             result = _limit_image_history(msgs)
         assert result == msgs
 
     def test_single_image_turn_kept(self):
         msgs = [_img_msg("look")]
-        with patch.object(ov_server, "VLM_MAX_IMAGE_TURNS", 1):
+        with patch.object(chat_handler, "VLM_MAX_IMAGE_TURNS", 1):
             result = _limit_image_history(msgs)
         # One turn, within limit — image preserved
         assert _has_images(result)
 
     def test_two_image_turns_keeps_last(self):
         msgs = [_img_msg("first"), _img_msg("second")]
-        with patch.object(ov_server, "VLM_MAX_IMAGE_TURNS", 1):
+        with patch.object(chat_handler, "VLM_MAX_IMAGE_TURNS", 1):
             result = _limit_image_history(msgs)
         # Last turn keeps image, first turn loses it
         assert not _has_images([result[0]])
@@ -373,7 +373,7 @@ class TestLimitImageHistory:
 
     def test_three_image_turns_keeps_last_two(self):
         msgs = [_img_msg("a"), _img_msg("b"), _img_msg("c")]
-        with patch.object(ov_server, "VLM_MAX_IMAGE_TURNS", 2):
+        with patch.object(chat_handler, "VLM_MAX_IMAGE_TURNS", 2):
             result = _limit_image_history(msgs)
         # First dropped, last two kept
         assert not _has_images([result[0]])
@@ -382,14 +382,14 @@ class TestLimitImageHistory:
 
     def test_zero_limit_keeps_all(self):
         msgs = [_img_msg("a"), _img_msg("b")]
-        with patch.object(ov_server, "VLM_MAX_IMAGE_TURNS", 0):
+        with patch.object(chat_handler, "VLM_MAX_IMAGE_TURNS", 0):
             result = _limit_image_history(msgs)
         # 0 means no limit — all kept unchanged
         assert result == msgs
 
     def test_non_image_turns_untouched(self):
         msgs = [_txt_msg("text1"), _img_msg("img"), _txt_msg("text2")]
-        with patch.object(ov_server, "VLM_MAX_IMAGE_TURNS", 1):
+        with patch.object(chat_handler, "VLM_MAX_IMAGE_TURNS", 1):
             result = _limit_image_history(msgs)
         assert result[0].content == "text1"
         assert result[2].content == "text2"
