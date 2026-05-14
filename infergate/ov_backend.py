@@ -1,8 +1,8 @@
 """
-OVServerBackend — infergate Backend Protocol implementation for ov_server.
+OVServerBackend / OVHBackend — infergate Backend Protocol implementations.
 
-Routing-only mode: available_models() and loaded_model_ids() read live ov_server
-globals. chat() is never called by Router.decide() — ov_server handles execution.
+Both are routing-only: chat() is never called. Inference and proxy forwarding
+are handled entirely by ov_server after Router.decide() / Router.reselect().
 """
 from infergate.protocols import Backend
 from infergate.types import InferRequest
@@ -32,4 +32,32 @@ class OVServerBackend:
     async def chat(self, request: InferRequest, model_id: str) -> dict:
         raise NotImplementedError(
             "OVServerBackend is routing-only — ov_server handles inference directly"
+        )
+
+
+class OVHBackend:
+    """Remote OVH inference backend. Routing-only — ov_server HTTP proxy handles execution.
+
+    available_models() reflects the live OVH catalogue cache so infergate's selector
+    can match config.yaml model descriptors against what OVH actually offers.
+    Returns [] when the catalogue has not yet been fetched (safe: selector skips OVH models).
+    """
+
+    is_local: bool = False
+    routing_only: bool = True
+
+    def name(self) -> str:
+        return "ovh"
+
+    def available_models(self) -> list[str]:
+        from catalogue import _catalogue_cache
+        entries, _ = _catalogue_cache.get("ovh", ([], 0.0))
+        return [e["id"] for e in entries]
+
+    def loaded_model_ids(self) -> list[str]:
+        return []  # remote — never resident in local memory
+
+    async def chat(self, request: InferRequest, model_id: str) -> dict:
+        raise NotImplementedError(
+            "OVHBackend is routing-only — ov_server handles HTTP proxy forwarding"
         )

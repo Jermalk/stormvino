@@ -148,11 +148,12 @@ import gpu_monitor
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0, str(_Path(__file__).parent / 'infergate'))
-from ov_backend import OVServerBackend as _OVServerBackend
+from ov_backend import OVServerBackend as _OVServerBackend, OVHBackend as _OVHBackend
 from ov_embedding_provider import OVEmbeddingProvider as _OVEmbeddingProvider
 from infergate.config import RouterConfig as _IGRouterConfig
 from infergate.router import Router as _IGRouter
 from infergate.types import InferRequest as _IGInferRequest
+from infergate import signals as _ig_signals
 
 _ig_router: _IGRouter | None = None
 
@@ -309,14 +310,16 @@ async def _apply_profile(name: str) -> None:
             kv_changed = new_kv != _cfg.get("kv_cache_size_gb")
 
             # Determine target LLM first — needed for coexistence check.
-            target = router._select_model("general", prof)
-            target_llm = target["id"]
+            assert _ig_router is not None, "infergate router not initialised"
+            _pref = prof.get("model_preference", "balanced")
+            _target = _ig_router.reselect("general", scope="local", force_tier=_pref)
+            target_llm = _target.model_id
             primary_vlm = VISION_MODEL
 
             # Keep VLM in memory if target LLM + VLM fit; evict otherwise.
             vlm_can_stay = (
                 bool(primary_vlm)
-                and target.get("provider", "loc") == "loc"
+                and _target.backend == "ov_server"
                 and model_manager.can_coexist(target_llm, primary_vlm)
             )
             if not vlm_can_stay:
@@ -451,7 +454,7 @@ async def _startup_preload() -> None:
     )
     _ig_router = _IGRouter(
         config=_ig_cfg,
-        backends={"ov_server": _OVServerBackend()},
+        backends={"ov_server": _OVServerBackend(), "ovh": _OVHBackend()},
         embedding_provider=_OVEmbeddingProvider(),
     )
     await _ig_router.load_embeddings()
@@ -678,7 +681,6 @@ async def set_scope(req: ScopeRequest) -> JSONResponse:
         )
     _cfg["provider_scope"] = req.scope
     catalogue._catalogue_cache.clear()
-    router._routing_prompt_cache.clear()  # scope change invalidates cached system blocks
     return JSONResponse(status_code=200, content={"scope": req.scope})
 
 
@@ -1054,25 +1056,16 @@ async def chat(req: ChatRequest):
             "model": model_id,
         }
     else:
-        # ── Cloud directive: ov_server-specific OVH proxy path ───────────────
-        # Only active when OVH backend is configured; otherwise ignored silently.
-        _ovh_configured = bool(_cfg.get("routing", {}).get("backends", {}).get("ovh"))
-        _cloud_directive = _ovh_configured and router._has_cloud_directive(req.messages)
-        if _cloud_directive:
-            log.info("[router] #cloud directive — scope=local+ovh pref=best")
-
         # ── infergate routing ─────────────────────────────────────────────────
         # AnythingLLM system-prompt agent: has tool-selection system prompt but no
         # req.tools. Pass a synthetic tool so infergate routes to web_search,
         # matching the original is_agent branch behaviour.
         _anythinglm_agent = not req.tools and "picks the most optimal function" in _sys
         _ig_tools: list[dict] | None = req.tools or ([{}] if _anythinglm_agent else None)
+        _ig_messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
         assert _ig_router is not None, "infergate router not initialised — startup error"
-        _ig_req = _IGInferRequest(
-            messages=[{"role": m.role, "content": m.content} for m in req.messages],
-            tools=_ig_tools,
-        )
+        _ig_req = _IGInferRequest(messages=_ig_messages, tools=_ig_tools)
         decision = await _ig_router.decide(_ig_req)
 
         task_class = decision.task_class
@@ -1083,23 +1076,29 @@ async def chat(req: ChatRequest):
         _route_confidence = decision.confidence
         _route_query_embedding = decision.embedding
 
-        # Cloud directive: use infergate task_class but re-select model with OVH scope.
-        # OVH proxy is ov_server-specific; infergate only has the local backend registered.
+        # Cloud directive: re-select with OVH scope when #cloud/#ovh present.
+        # OVH proxy endpoint spec lives in config.json routing.backends — ov_server
+        # handles the HTTP forward; infergate just selects the model.
+        _ovh_configured = bool(_cfg.get("routing", {}).get("backends", {}).get("ovh"))
+        _cloud_directive = _ovh_configured and _ig_signals.has_cloud_directive(_ig_messages)
         if _cloud_directive:
-            cplx = router.complexity_score(req)
-            est_tokens = sum(len(_text_content(m)) for m in req.messages) // 4
-            model_entry = router._select_model(
-                task_class, active_profile_cfg, cplx, est_tokens,
-                scope_override="local+ovh", pref_override="best",
+            log.info("[router] #cloud directive — scope=local+remote pref=best")
+            decision = _ig_router.reselect(
+                task_class=task_class,
+                scope="local+remote",
+                force_tier="best",
             )
-            model_id = model_entry["id"]
+            model_id = decision.model_id
             strategy = "cloud_directive"
             _route_strategy = strategy
             _route_confidence = 1.0
-        else:
-            model_entry = {"id": model_id, "provider": "loc"}
 
-        _task_directive = router.task_class_directive(req.messages)
+        model_entry = {
+            "id": model_id,
+            "provider": decision.backend if decision.backend != "ov_server" else "loc",
+        }
+
+        _task_directive = decision.task_directive
         routing_decision = {
             "task_class": task_class,
             "model": model_id,
