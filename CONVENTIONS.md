@@ -11,12 +11,16 @@
 | File | Owns | Never put here |
 |---|---|---|
 | `server_config.py` | Config loading, model discovery, startup constants, `_cfg` dict | Any model loading, FastAPI, state mutation |
+| `app_state.py` | Shared mutable runtime state: ServerStats, active_profile, ig_router, debug_logging | Config loading, model loading, route handlers |
 | `model_manager.py` | Loaded model state, VRAM tracking, locks, loaders, AsyncTokenStreamer | Route handlers, catalogue, routing logic |
 | `catalogue.py` | Model catalogue (local + remote), TTL cache | Model loading, route handlers |
 | `router.py` | Signal detection, embedding routing, model selection, assessor | Model loading, catalogue fetch, route handlers |
 | `prompt_builder.py` | Message types, prompt construction, tool-call parsing, `has_images()` | Any I/O, model loading, FastAPI |
 | `db.py` | Postgres writes and queries | Model logic, routing, FastAPI |
-| `ov_server.py` | FastAPI app, endpoints, middleware, profile switching, image helpers | Business logic that belongs in the modules above |
+| `chat_handler.py` | `/v1/chat/completions`: ChatRequest, VLM path, OVH proxy, streaming | Any admin, media, or non-chat endpoints |
+| `admin_routes.py` | health, version, metrics, admin, catalogue, monitor, `_apply_profile` | Chat or media endpoints |
+| `media_routes.py` | `/v1/images/generations`, `/v1/audio/transcriptions` | Chat, admin, or model-loading logic |
+| `ov_server.py` | FastAPI app wiring: middleware, router includes, embeddings, startup/shutdown | Any route handlers (use routers instead) |
 
 ---
 
@@ -26,10 +30,14 @@
 db              ← no ov_server imports
 server_config   ← no ov_server imports
 prompt_builder  ← no ov_server imports
+app_state       ← no ov_server imports (leaf module)
 model_manager   ← server_config, db
 catalogue       ← server_config, model_manager
 router          ← server_config, model_manager, db, prompt_builder
-ov_server       ← all of the above
+chat_handler    ← server_config, model_manager, catalogue, router, prompt_builder, app_state, db, infergate
+admin_routes    ← server_config, model_manager, catalogue, router, app_state, db, gpu_monitor, image_pipeline, stt_pipeline
+media_routes    ← server_config, image_pipeline, stt_pipeline
+ov_server       ← all of the above; wires routers, owns startup/shutdown
 ```
 
 **Rule:** never introduce an import that creates a cycle.
@@ -77,9 +85,9 @@ model = model_manager.emb_model
 
 ## Adding a new endpoint
 
-1. Open `ov_server.py` only.
-2. Add the Pydantic request model (if needed) near the other models in ov_server.py (around `ChatRequest`).
-3. Add the route handler using `@app.get` or `@app.post`.
+1. Decide which router owns it: chat → `chat_handler.py`; admin/ops → `admin_routes.py`; media → `media_routes.py`.
+2. Add the Pydantic request model (if needed) near the other models in that file.
+3. Add the route handler using `@<router>.get` or `@<router>.post`.
 4. Call into the relevant module (`model_manager`, `catalogue`, `router`) — do not
    duplicate logic that already exists there.
 5. Verify: `curl -s http://localhost:11435/<your-path> | python3 -m json.tool`

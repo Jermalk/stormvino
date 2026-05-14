@@ -469,3 +469,9 @@
 **Rationale:** The 30s auto-refresh interval can have a fetch in flight when the user clicks a range button. Without the guard, the in-flight response (for the old range) arrives after the new response and overwrites the chart — making range buttons appear broken.
 **Rejected alternative:** Cancel in-flight requests via AbortController — works but adds complexity; the guard is simpler and sufficient since we only render once.
 **Affects:** monitor/src/lib/Charts.svelte
+
+### 2026-05-14 — Module split refactor: APIRouter pattern with app_state leaf module
+**Decision:** Split ov_server.py (1819 lines) into chat_handler.py, admin_routes.py, media_routes.py, and app_state.py using FastAPI's APIRouter pattern.
+**Rationale:** ov_server.py had grown to contain unrelated concerns. APIRouter lets each module own its routes and be tested independently. app_state.py as a leaf module (no imports from the ov_server hierarchy) breaks circular imports while making shared mutable state explicit and accessible to all routers.
+**Rejected alternative:** Option A (extract only app_state + chat_handler) — delivered less value; went with Option B to also extract admin and media routes, reducing ov_server.py to ~240 lines of pure wiring.
+**Affects:** ov_server.py, chat_handler.py, admin_routes.py, media_routes.py, app_state.py

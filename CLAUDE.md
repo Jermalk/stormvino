@@ -67,6 +67,7 @@ FastAPI server exposing an OpenAI-compatible REST API (`/v1/chat/completions`, `
 |---|---|---|
 | HTTP server | FastAPI + Uvicorn | Single-worker, `asyncio` loop |
 | LLM inference | `openvino_genai.LLMPipeline` | Blocking; offloaded to executor |
+| Chat path | `chat_handler.py` | ChatRequest, VLM path, OVH proxy, `/v1/chat/completions` |
 | Prompt building | `prompt_builder.py` | `build_prompt()`, `build_vlm_prompt()`, tool-call parser, streaming handler |
 | Streaming | `AsyncTokenStreamer` (model_manager) | Subclass of `ov_genai.StreamerBase`; event loop captured at construction |
 | Embeddings | `OVModelForFeatureExtraction` (optimum-intel) | Mean-pooled, L2-normalised; lives in `model_manager.py` |
@@ -74,6 +75,9 @@ FastAPI server exposing an OpenAI-compatible REST API (`/v1/chat/completions`, `
 | Model catalogue | `catalogue.py` | Local discovery + OVH remote fetch with TTL cache |
 | Model lifecycle | `model_manager.py` | Loaded models, VRAM tracking, LRU eviction, assessor |
 | Config/discovery | `server_config.py` | Config loading, model discovery, startup constants |
+| Shared state | `app_state.py` | ServerStats, active_profile, ig_router, debug_logging — leaf module, no cycles |
+| Admin/ops | `admin_routes.py` | health, version, metrics, admin, catalogue, monitor endpoints; `_apply_profile` |
+| Media | `media_routes.py` | `/v1/images/generations`, `/v1/audio/transcriptions` |
 | Models | `qwen3-8b-int4-ov`, `qwen3-14b-int4-ov`, `qwen2.5-vl-7b-int4-ov` | Up to 2 LLMs loaded; LRU eviction with VRAM check |
 
 **Entry point:** `/opt/ov_server/ov_server.py`
@@ -239,7 +243,11 @@ On re-entry: if non-empty, read aloud and ask user before proceeding (bootstrap 
 
 | File | Purpose |
 |---|---|
-| `ov_server.py` | FastAPI app, endpoints, middleware, profile switching, image helpers |
+| `ov_server.py` | FastAPI app wiring: middleware, router includes, embeddings endpoint, startup/shutdown |
+| `app_state.py` | Shared mutable state: ServerStats, active_profile, ig_router, debug_logging |
+| `chat_handler.py` | Full chat path: ChatRequest, VLM, OVH proxy, `/v1/chat/completions` |
+| `admin_routes.py` | health, version, metrics, admin, catalogue, monitor endpoints; `_apply_profile` |
+| `media_routes.py` | `/v1/images/generations`, `/v1/audio/transcriptions` |
 | `server_config.py` | Config loading, model discovery, startup constants, resolved-model helpers |
 | `model_manager.py` | Model lifecycle state, VRAM tracking, LRU eviction, AsyncTokenStreamer, assessor |
 | `catalogue.py` | Model catalogue: local discovery + OVH remote fetch with TTL cache |
