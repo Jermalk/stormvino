@@ -445,9 +445,9 @@
 
 ## NOW
 
-**Working on:** idle — infergate integration track complete, router.py cleaned up
+**Working on:** infergate round 3 feedback written — waiting for infergate session to ship v0.1.4
 **Last commit:** bd2e501 — refactor: remove router.py functions replaced by infergate
-**Next action:** check feedback/SIGNAL.md on re-entry; if RELEASE READY upgrade infergate and start round 3
-**Blocked on:** nothing
-**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) PyPI publish lag — worth raising in round 3 feedback.
+**Next action:** on re-entry check SIGNAL.md; if RELEASE READY upgrade venv and delete router.py residuals (complexity_score, _has_cloud_directive, task_class_directive, _select_model)
+**Blocked on:** infergate P1 (Router.reselect) and P2 (RouteDecision.task_directive) — blocks router.py full removal
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
 **Tests:** pass — 153/153

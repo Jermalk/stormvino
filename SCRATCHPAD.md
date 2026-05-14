@@ -4,4 +4,4 @@
 > Format: bullet points, max 5 lines per topic, no prose.
 
 ## Carried over:
-Session 44: infergate 0.1.3 integrated. round_02_v0.1.2.md feedback written (routing_only marker P1, force_tier docstring P2). SIGNAL.md cycled FEEDBACK READY → RELEASE READY. OVServerBackend gained routing_only=True. router.py cleaned: _detect_signal, _compute_task_class_centroids, _route_by_embedding, route_by_embedding removed; _load_embedding_centroids slimmed to model-load only. 23 tests deleted, 153/153 pass. PyPI publish lag noted for round 3 feedback. Next: check SIGNAL.md on re-entry.
+Session 45: infergate 0.1.3 confirmed in venv (wheel). SIGNAL.md was RELEASE READY. round_03_v0.1.3.md written — P1: Router.reselect() for cloud directive re-selection (unblocks router._select_model deletion), P2: RouteDecision.task_directive field (unblocks router.task_class_directive deletion). SIGNAL.md cycled → FEEDBACK READY. PROGRESS.md updated. Waiting for infergate session to ship v0.1.4.
