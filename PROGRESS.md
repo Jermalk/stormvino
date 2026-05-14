@@ -443,11 +443,21 @@
 
 ---
 
-## NOW
-
-**Working on:** infergate 0.1.4 integration complete — router.py reduced to 23 lines
-**Last commit:** a4518f9 — feat: infergate 0.1.4 — Router.reselect + RouteDecision.task_directive
-**Next action:** check SIGNAL.md on re-entry; then start VRAM profiler Step 1 (plans/20260511_PLAN_vram_profiler.md)
+### 2026-05-14 — Session 47 (8b2e3bb)
+**Working on:** infergate 0.1.4 integration — OVHBackend, Router.reselect, RouteDecision.task_directive, router.py → 23 lines; db.py unit tests; VRAM profiler confirmed; round 4 feedback written
+**Last commit:** 8b2e3bb — docs: session wrap — infergate 0.1.4 integration, router.py to 23 lines
+**Next action:** SVP Phase 2 (live charts) — all already implemented; check monitor dist
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVHBackend.available_models() silently empty until OVH catalogue fetched — acceptable.
+**Tests:** pass — 159/159
+
+---
+
+## NOW
+
+**Working on:** SVP — all phases 1–5 confirmed complete; clock tick bug fixed
+**Last commit:** 8b2e3bb — docs: session wrap — infergate 0.1.4 integration, router.py to 23 lines
+**Next action:** await infergate round 4 response (SIGNAL.md FEEDBACK READY); or pick next feature
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
 **Tests:** pass — 159/159

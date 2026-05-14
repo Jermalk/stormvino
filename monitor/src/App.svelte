@@ -15,6 +15,7 @@
   let profiler = $state(null)
   let error    = $state(null)
   let timers   = []
+  let clockStr = $state(new Date().toLocaleTimeString())
 
   // Derived views used by child panels (same shape as before).
   const health   = $derived(metrics?.server_health ?? null)
@@ -36,6 +37,7 @@
     pollSidecar(); pollProfiler()
     timers.push(setInterval(pollSidecar,   1000))
     timers.push(setInterval(pollProfiler,  4000))
+    timers.push(setInterval(() => { clockStr = new Date().toLocaleTimeString() }, 1000))
   })
   onDestroy(() => timers.forEach(clearInterval))
 </script>
@@ -51,7 +53,7 @@
     {:else if metrics}
       <span class="server-down" title="server offline">⊘</span>
     {/if}
-    <span class="clock">{new Date().toLocaleTimeString()}</span>
+    <span class="clock">{clockStr}</span>
   </header>
 
   <!-- Row 1: VRAM bar -->
