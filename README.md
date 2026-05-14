@@ -2,6 +2,20 @@
 
 OpenVINO-backed OpenAI-compatible API server. Exposes `/v1/chat/completions`, `/v1/embeddings`, and `/v1/models` on port `11435`.
 
+---
+
+## Origin
+
+Stormvino grew out of **[Shangri-Lab](https://github.com/Jermalk/shangri-lab)** — a personal lab built by an IT architect from Silesia who had no Python background, a pair of Intel Arc GPUs, and a firm belief that local inference shouldn't require Nvidia hardware or magic frameworks.
+
+The ov-server project inside Shangri-Lab started as the simplest thing that could work: one file, one pipeline, full visibility into every decision. No hidden buffers. No black boxes. If it couldn't be observed, it didn't count as working.
+
+That lab instinct turned out to be the right foundation. What began as a single-file experiment accumulated real routing logic, multimodal support, streaming, tool calls, VRAM management, and an embedding-based task classifier. At some point it stopped being an experiment and became the thing running production workloads.
+
+Stormvino is that thing — the Shangri-Lab ov-server, grown up. The philosophy is unchanged: build the simplest thing that gives full visibility first, tune quality only after you can observe it. The scope and reliability are just considerably larger.
+
+---
+
 ## Starting the server
 
 ```bash
@@ -82,8 +96,5 @@ curl -s http://localhost:11435/v1/models | python3 -m json.tool
 ## Example chat request
 
 ```bash
-curl -s http://localhost:11435/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model": "qwen3-14b-int4-ov", "messages": [{"role": "user", "content": "Hello"}]}' \
-  | python3 -m json.tool
+curl -s http://localhost:11435/v1/chat/completions -H "Content-Type: application/json" -d '{"model": "qwen3-14b-int4-ov", "messages": [{"role": "user", "content": "Hello"}]}' | python3 -m json.tool
 ```
