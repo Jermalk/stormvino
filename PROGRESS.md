@@ -465,8 +465,8 @@
 
 ## NOW
 
-**Working on:** Module split refactor complete — ov_server.py is now 240 lines; 5 router modules extracted
-**Last commit:** 9bfcded — refactor: extract admin_routes.py + media_routes.py — ov_server.py 761→240 lines
+**Working on:** Module split refactor complete — ov_server.py 1819→240 lines; chat_handler, admin_routes, media_routes, app_state extracted
+**Last commit:** 4c8b662 — docs: session wrap — module split refactor complete, ov_server.py 1819→240 lines
 **Next action:** user-directed
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
