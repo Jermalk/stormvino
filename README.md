@@ -1,4 +1,4 @@
-# ov_server
+# Stormvino
 
 OpenVINO-backed OpenAI-compatible API server. Exposes `/v1/chat/completions`, `/v1/embeddings`, and `/v1/models` on port `11435`.
 
