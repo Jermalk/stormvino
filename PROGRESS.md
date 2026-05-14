@@ -463,11 +463,21 @@
 
 ---
 
+### 2026-05-14 — Session 49 (bc6c7e7)
+**Working on:** infergate 0.1.8→0.1.9 upgrade, routing bug fixes, curl test suite
+**Last commit:** bc6c7e7 — feat: infergate 0.1.9 — cache_stats in /health + estimated_cost_usd in routing
+**Next action:** upgrade infergate to 0.2.0 when PyPI publish lands; remove decide→reselect workaround (c5711b5); replace with decide(force_tier=)
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) infergate 0.2.0 PyPI publish pending — addressed_06_v0.2.0.md written but pip install not yet available.
+**Tests:** pass — 159/159
+
+---
+
 ## NOW
 
-**Working on:** Module split refactor complete — ov_server.py 1819→240 lines; chat_handler, admin_routes, media_routes, app_state extracted
-**Last commit:** 4c8b662 — docs: session wrap — module split refactor complete, ov_server.py 1819→240 lines
-**Next action:** user-directed
-**Blocked on:** nothing
+**Working on:** infergate 0.2.0 upgrade — decide(force_tier=) replaces decide→reselect workaround
+**Last commit:** bc6c7e7 — feat: infergate 0.1.9 — cache_stats in /health + estimated_cost_usd in routing
+**Next action:** `pip install --upgrade infergate` when 0.2.0 lands; then replace profile-tier reselect block in chat_handler.py with single decide(force_tier=_prof_pref) call
+**Blocked on:** infergate 0.2.0 not yet on PyPI (addressed_06_v0.2.0.md confirms it shipped; PyPI lag)
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
 **Tests:** pass — 159/159

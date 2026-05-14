@@ -475,3 +475,15 @@
 **Rationale:** ov_server.py had grown to contain unrelated concerns. APIRouter lets each module own its routes and be tested independently. app_state.py as a leaf module (no imports from the ov_server hierarchy) breaks circular imports while making shared mutable state explicit and accessible to all routers.
 **Rejected alternative:** Option A (extract only app_state + chat_handler) — delivered less value; went with Option B to also extract admin and media routes, reducing ov_server.py to ~240 lines of pure wiring.
 **Affects:** ov_server.py, chat_handler.py, admin_routes.py, media_routes.py, app_state.py
+
+### 2026-05-14 — Profile tier applied via reselect() after decide() (temporary workaround)
+**Decision:** After Router.decide(), if active_profile's model_preference != "fastest", call reselect() with force_tier=model_preference to override model selection.
+**Rationale:** Router.decide() reads active_profile from the frozen startup config (always "fast"). Profile switches via /admin/profile never updated infergate's internal state. The reselect() workaround restores correct tier selection per profile without changing infergate's API. Marked temporary — superseded once infergate 0.2.0 lands with decide(force_tier=).
+**Rejected alternative:** Reconstruct Router on each profile switch — too expensive; losing embedding cache on every switch.
+**Affects:** chat_handler.py (commit c5711b5); will be replaced by decide(force_tier=) on infergate 0.2.0 upgrade
+
+### 2026-05-14 — embedding_cache exposed in /health via Router.cache_stats()
+**Decision:** Add embedding_cache: {hits, misses, size, capacity} to the /health response, populated from Router.cache_stats() introduced in infergate 0.1.9.
+**Rationale:** No way to tune embedding_cache_size without aggregate hit/miss data. Per-request trace is too expensive to run in production. /health is polled by ov_monitor — cache stats land there automatically.
+**Rejected alternative:** Expose via /metrics/summary only — /health is the primary polling target; putting it there makes it visible to all consumers without extra requests.
+**Affects:** admin_routes.py
