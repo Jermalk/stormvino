@@ -13,7 +13,7 @@ import numpy as np
 def _encode(texts: list[str]) -> list[list[float]]:
     """Blocking encode: tokenise → forward → mean-pool → L2-normalise.
 
-    Mirrors the embedding logic in router._route_by_embedding().
+    Same mean-pool + L2-normalise logic as the removed router._route_by_embedding().
     Must be called from run_in_executor — never directly from async code.
     """
     import model_manager

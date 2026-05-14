@@ -8,14 +8,11 @@ import logging
 import re
 from typing import Any
 
-import numpy as np
-
-import db
 import model_manager
 import catalogue
-from prompt_builder import _text_content, has_images
+from prompt_builder import _text_content
 from server_config import (
-    _cfg, _GIT_COMMIT,
+    _cfg,
     AVAILABLE_MODELS, AVAILABLE_VLM_MODELS,
     get_agent_model,
 )
@@ -25,7 +22,6 @@ log = logging.getLogger("ov_server")
 # ---------------------------------------------------------------------------
 # Routing state
 # ---------------------------------------------------------------------------
-_task_class_embeddings: dict[str, np.ndarray] | None = None  # None=not loaded, {}=failed
 _last_routing_decision: dict | None = None
 _routing_prompt_cache: dict[tuple[str, str], str] = {}  # keyed (scope, profile_name)
 
@@ -42,8 +38,6 @@ SIMPLE_Q_RE = re.compile(
     r"\b.{0,60}\??\s*$",
     re.IGNORECASE,
 )
-
-_SIGNAL_ONLY_CLASSES: frozenset[str] = frozenset({"has_image", "has_tools"})
 
 _CLOUD_DIRECTIVE_RE = re.compile(r'#(ovh|cloud)\b', re.IGNORECASE)
 _TASK_DIRECTIVE_RE  = re.compile(r'#(code|document|general)\b', re.IGNORECASE)
@@ -62,142 +56,14 @@ def task_class_directive(messages: list) -> str | None:
     return _TASK_DIRECTIVE_MAP.get(m.group(1).lower()) if m else None
 
 
-# ---------------------------------------------------------------------------
-# Signal detector — fast-path routing (O(1) / O(n_keywords), always <1 ms)
-# ---------------------------------------------------------------------------
-
-def _detect_signal(req: Any) -> str | None:
-    """Return task_class name if a fast-path signal fires, else None.
-
-    Checked in priority order:
-      0. hashtag directive (#code / #document / #general) → explicit override
-      1. image content  → "vision"
-      2. client tools   → "web_search"
-      3. long context   → "document"
-      4. keyword match  → task_class from router.keywords
-    """
-    # 0. explicit task-class directive — highest priority
-    directive = task_class_directive(req.messages)
-    if directive:
-        return directive
-
-    # 1. image
-    if has_images(req.messages):
-        return "vision"
-
-    # 2. client-provided tools
-    if req.tools:
-        return "web_search"
-
-    # 3. long context — char/4 token estimate across user+assistant only (exclude system
-    #    prompt — AnythingLLM @agent system prompts are huge and would always trip this)
-    router_cfg = _cfg.get("router", {})
-    threshold = router_cfg.get("long_context_tokens", 4000)
-    total_tokens = sum(len(_text_content(m)) for m in req.messages if m.role != "system") // 4
-    if total_tokens > threshold:
-        return "document"
-
-    # 4. keyword match on last user message
-    last_user_text = next(
-        (_text_content(m) for m in reversed(req.messages) if m.role == "user"),
-        "",
-    )
-    if last_user_text:
-        text_lower = last_user_text.lower()
-        for task_class, keywords in router_cfg.get("keywords", {}).items():
-            if any(kw.lower() in text_lower for kw in keywords):
-                return task_class
-
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Embedding similarity router — Stage 2 routing
-# ---------------------------------------------------------------------------
-
-def _compute_task_class_centroids(model: Any, tok: Any) -> "dict[str, np.ndarray]":
-    """Compute L2-normalised centroid embedding for each task class.
-    Uses description + optional 'examples' list from config.
-    Skips task classes with binary signals (has_image, has_tools) — those are
-    handled exclusively by _detect_signal() and must not appear as embedding targets."""
-    centroids: dict[str, np.ndarray] = {}
-    for name, cls_cfg in _cfg.get("task_classes", {}).items():
-        if cls_cfg.get("signal") in _SIGNAL_ONLY_CLASSES:
-            continue
-        texts = []
-        desc = cls_cfg.get("description", "")
-        if desc:
-            texts.append(desc)
-        texts.extend(cls_cfg.get("examples", []))
-        if not texts:
-            continue
-        inputs = tok(texts, return_tensors="pt", padding=True, truncation=True, max_length=512)
-        outputs = model(**inputs)
-        vecs = outputs.last_hidden_state.mean(dim=1).detach().numpy()
-        centroid = vecs.mean(axis=0)
-        norm = np.linalg.norm(centroid)
-        centroids[name] = centroid / max(norm, 1e-9)
-    return centroids
-
-
 async def _load_embedding_centroids() -> None:
-    """Blocking startup step: load embedding model and compute task class centroids."""
-    global _task_class_embeddings
-    try:
-        model, tok = await model_manager.get_embedding_model()
-        loop = asyncio.get_running_loop()
-        centroids = await loop.run_in_executor(None, _compute_task_class_centroids, model, tok)
-        _task_class_embeddings = centroids
-        log.info(f"[router] centroids ready for: {list(centroids.keys())}")
-        cfg_classes = _cfg.get("task_classes", {})
-        for tc, vec in centroids.items():
-            examples = cfg_classes.get(tc, {}).get("examples", [])
-            db.write_centroid_snapshot(
-                commit=_GIT_COMMIT, task_class=tc,
-                centroid=vec.tolist(), example_count=len(examples),
-            )
-    except Exception as exc:
-        log.warning(f"[router] centroid computation failed ({exc}) — Stage 2 routing disabled")
-        _task_class_embeddings = {}
-
-
-def _route_by_embedding(query: str) -> tuple[str, float, list[float] | None]:
-    """Return (task_class, cosine_similarity, embedding_vector) for the best-matching task class.
-    Returns ('general', 0.0, None) when embeddings are unavailable."""
-    if not _task_class_embeddings:
-        return ("general", 0.0, None)
-
-    inputs = model_manager.emb_tokenizer(
-        [query[:2048]],  # ~512-token char budget
-        return_tensors="pt", padding=True, truncation=True, max_length=512,
-    )
-    outputs = model_manager.emb_model(**inputs)
-    vec = outputs.last_hidden_state.mean(dim=1).detach().numpy()[0]
-    norm = np.linalg.norm(vec)
-    vec = vec / max(norm, 1e-9)
-
-    best_class, best_score = "general", 0.0
-    for task_class, centroid in _task_class_embeddings.items():
-        score = float(np.dot(vec, centroid))
-        if score > best_score:
-            best_class, best_score = task_class, score
-
-    min_conf: float = _cfg.get("router", {}).get("embedding_min_confidence", 0.72)
-    if best_score < min_conf:
-        best_class = "general"
-
-    return (best_class, best_score, vec.tolist())
-
-
-async def route_by_embedding(query: str) -> tuple[str, float, list[float] | None]:
-    """Async wrapper — offloads the CPU-bound embedding forward pass to a thread executor
-    so the event loop is not blocked during Stage-2 routing."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _route_by_embedding, query)
+    """Load embedding model into model_manager globals. Centroid computation handled by infergate."""
+    await model_manager.get_embedding_model()
+    log.info("[router] embedding model loaded")
 
 
 # ---------------------------------------------------------------------------
-# Model selector — Stage 2/3 routing
+# Model selector
 # ---------------------------------------------------------------------------
 
 def complexity_score(req: Any) -> float:
