@@ -524,8 +524,17 @@ async def chat(req: ChatRequest):
         _ig_messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
         assert app_state.ig_router is not None, "infergate router not initialised — startup error"
+        _prof_pref = (
+            _cfg.get("profiles", {})
+            .get(app_state.active_profile, {})
+            .get("model_preference", "fastest")
+        )
         _ig_req = _IGInferRequest(messages=_ig_messages, tools=_ig_tools)
-        decision = await app_state.ig_router.decide(_ig_req, trace=app_state.debug_logging)
+        decision = await app_state.ig_router.decide(
+            _ig_req,
+            trace=app_state.debug_logging,
+            force_tier=None if _prof_pref == "fastest" else _prof_pref,
+        )
 
         task_class = decision.task_class
         model_id = decision.model_id
@@ -549,25 +558,6 @@ async def chat(req: ChatRequest):
             strategy = "cloud_directive"
             _route_strategy = strategy
             _route_confidence = 1.0
-        else:
-            # infergate's active_profile is frozen at startup ("fast"). Apply the
-            # current ov_server profile's model_preference via reselect() so that
-            # profile switches (precise→balanced, laborious→best) affect model selection.
-            _prof_pref = (
-                _cfg.get("profiles", {})
-                .get(app_state.active_profile, {})
-                .get("model_preference", "fastest")
-            )
-            if _prof_pref != "fastest":
-                decision = app_state.ig_router.reselect(
-                    task_class=task_class,
-                    scope="local",
-                    force_tier=_prof_pref,
-                )
-                model_id = decision.model_id
-                _route_confidence = decision.confidence
-                strategy = f"{strategy}+{app_state.active_profile}"
-                _route_strategy = strategy
 
         model_entry = {
             "id": model_id,
