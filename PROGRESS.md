@@ -423,9 +423,9 @@
 
 ---
 
-### 2026-05-14 — Session 43 (TBD)
+### 2026-05-14 — Session 43 (fb35069)
 **Working on:** infergate integration — config.yaml, OVServerBackend, OVEmbeddingProvider, wiring into ov_server.py, smoke tests
-**Last commit:** TBD
+**Last commit:** fb35069 — docs: update PROGRESS.md with final session 43 commit hash
 **Next action:** remove redundant routing functions from router.py (cleanup pass); or write round 2 feedback when new infergate version ships
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) router.py legacy functions (_detect_signal, route_by_embedding, _select_model, _load_embedding_centroids) still present — redundant but harmless until cleanup pass.
@@ -433,11 +433,21 @@
 
 ---
 
+### 2026-05-14 — Session 44 (bd2e501)
+**Working on:** infergate 0.1.3 sync + router.py cleanup
+**Last commit:** bd2e501 — refactor: remove router.py functions replaced by infergate
+**Next action:** await infergate round 3 signal; or start next feature (see open questions)
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) PyPI publish lag — infergate session ships wheel locally only; note for round 3 feedback.
+**Tests:** pass — 153/153 (23 deleted: TestDetectSignal, TestComputeTaskClassCentroids, TestRouteByEmbedding)
+
+---
+
 ## NOW
 
-**Working on:** infergate integration — wiring complete, all routing paths live
-**Last commit:** 104e6a2 — feat: infergate 0.1.2 integration — routing-only mode live
-**Next action:** router.py cleanup (remove replaced functions); or await infergate round 2 feedback cycle
+**Working on:** idle — infergate integration track complete, router.py cleaned up
+**Last commit:** bd2e501 — refactor: remove router.py functions replaced by infergate
+**Next action:** check feedback/SIGNAL.md on re-entry; if RELEASE READY upgrade infergate and start round 3
 **Blocked on:** nothing
-**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) router.py legacy routing functions redundant — schedule cleanup pass.
-**Tests:** pass — 176/176
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) PyPI publish lag — worth raising in round 3 feedback.
+**Tests:** pass — 153/153

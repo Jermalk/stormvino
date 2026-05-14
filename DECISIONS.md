@@ -458,6 +458,12 @@
 **Rejected alternative:** Change `>` to `>=` — would allow a lower-tier entry to overwrite a higher-tier one if processed in wrong order; semantics less clear.
 **Affects:** catalogue.py — _tier_map_for_provider
 
+### 2026-05-14 — router.py routing functions deleted after infergate replaces them
+**Decision:** Remove _detect_signal, _compute_task_class_centroids, _route_by_embedding, route_by_embedding and associated state; slim _load_embedding_centroids to model-load only.
+**Rationale:** infergate Router.decide() now handles all signal detection, embedding similarity, and model selection. Keeping the old functions would create two authoritative routing paths and confuse future readers. _load_embedding_centroids retained (renamed in spirit only) because OVEmbeddingProvider still requires emb_model to be in globals before the first embed() call.
+**Rejected alternative:** Keep functions as fallback — the infergate integration is complete and tested; a silent fallback would mask failures rather than surface them.
+**Affects:** router.py, tests/test_pure.py (23 tests removed)
+
 ### 2026-05-14 — Charts loadSeq counter guards against stale fetch responses
 **Decision:** Added `loadSeq` integer counter to Charts.svelte; each `load()` call captures `seq = ++loadSeq` and discards the response if `seq !== loadSeq` on arrival.
 **Rationale:** The 30s auto-refresh interval can have a fetch in flight when the user clicks a range button. Without the guard, the in-flight response (for the old range) arrives after the new response and overwrites the chart — making range buttons appear broken.
