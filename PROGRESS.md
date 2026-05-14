@@ -445,9 +445,9 @@
 
 ## NOW
 
-**Working on:** Observability Phase 1 complete — db tests written; next is VRAM profiler
-**Last commit:** 8d018f4 — test: db.py unit tests — 26 tests covering pool, writes, queries
-**Next action:** check SIGNAL.md on re-entry; if RELEASE READY upgrade venv; then start VRAM profiler Step 1
-**Blocked on:** infergate P1 (Router.reselect) and P2 (RouteDecision.task_directive) — blocks router.py full removal
-**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
-**Tests:** pass — 179/179
+**Working on:** infergate 0.1.4 integration complete — router.py reduced to 23 lines
+**Last commit:** a4518f9 — feat: infergate 0.1.4 — Router.reselect + RouteDecision.task_directive
+**Next action:** check SIGNAL.md on re-entry; then start VRAM profiler Step 1 (plans/20260511_PLAN_vram_profiler.md)
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVHBackend.available_models() silently empty until OVH catalogue fetched — acceptable.
+**Tests:** pass — 159/159
