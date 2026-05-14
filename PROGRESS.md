@@ -436,7 +436,7 @@
 ## NOW
 
 **Working on:** infergate integration — wiring complete, all routing paths live
-**Last commit:** TBD
+**Last commit:** 104e6a2 — feat: infergate 0.1.2 integration — routing-only mode live
 **Next action:** router.py cleanup (remove replaced functions); or await infergate round 2 feedback cycle
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) router.py legacy routing functions redundant — schedule cleanup pass.
