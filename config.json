@@ -15,6 +15,7 @@
     "vram_headroom_gb":       1.5,
     "max_ram_percent":        85.0,
     "max_new_tokens_default": 2048,
+    "inference_timeout_sec":  900,
     "vlm_max_image_turns":    1,
     "vlm_max_image_side_px":  1280,
     "enable_prefix_caching":  true,

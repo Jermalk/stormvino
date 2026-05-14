@@ -3,7 +3,13 @@
     "allow": [
       "Bash(*)",
       "Bash(python3 *)",
-      "Bash(source *)"
+      "Bash(source *)",
+      "Read(/opt/ov_server/*)",
+      "Write(/opt/ov_server/*)",
+      "Edit(/opt/ov_server/*)",
+      "Read(/home/jerzy/Dokumenty/Projects/infergate/*)",
+      "Write(/home/jerzy/Dokumenty/Projects/infergate/*)",
+      "Edit(/home/jerzy/Dokumenty/Projects/infergate/*)"
     ]
   }
 }

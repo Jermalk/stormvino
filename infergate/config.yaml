@@ -1,0 +1,153 @@
+# infergate routing config for ov_server
+#
+# Field mapping from config.json:
+#   provider: "loc"          → backend: ov_server   (matches OVServerBackend.name())
+#   provider: "ovh"          → backend: ovh
+#   max_context_tokens        → ctx_limit
+#   signal: "has_image"      → signal_only: true
+#   signal: "has_tools"      → signal_only: true
+#   signal: "long_context"   → (omitted) — infergate detect_signal() handles this via
+#                               router.long_context_tokens; document remains embeddable
+#
+# This file is the single source of routing truth for the infergate layer.
+# Inference parameters (thinking, max_new_tokens, kv_cache) stay in config.json.
+
+provider_scope: local
+active_profile: fast
+
+profiles:
+  fast:
+    model_preference: fastest
+  precise:
+    model_preference: balanced
+  laborious:
+    model_preference: best
+
+router:
+  embedding_min_confidence: 0.72
+  long_context_tokens: 4000
+  tools_task_class: web_search
+  keywords:
+    web_search:
+      - "search for"
+      - "find on the web"
+      - "look up"
+      - "google"
+      - "browse"
+      - "what's the latest"
+      - "latest news"
+      - "current events"
+      - "wyszukaj"
+      - "znajdź w internecie"
+      - "sprawdź w sieci"
+      - "najnowsze wiadomości"
+      - "aktualne informacje"
+      - "co słychać"
+
+task_classes:
+
+  vision:
+    description: "Analyzing or describing an image, photo, chart, diagram, or screenshot"
+    signal_only: true   # triggered by has_image; never reaches embedding routing
+    examples:
+      - "describe this image"
+      - "what is in this photo"
+      - "read the text in this picture"
+      - "what does this chart show"
+      - "analyze this screenshot"
+      - "identify objects in the image"
+    models:
+      - id: qwen2.5-vl-7b-int4-ov
+        backend: ov_server
+        tier: fast
+        modality: vision
+      - id: internvl2.5-8b-int4-ov
+        backend: ov_server
+        tier: best
+        modality: vision
+
+  web_search:
+    description: "Search the web, find current events, retrieve live information"
+    signal_only: true   # triggered by req.tools presence; never reaches embedding routing
+    models:
+      - id: qwen3-8b-int4-ov
+        backend: ov_server
+        tier: fast
+        ctx_limit: 28000
+      - id: qwen3-14b-int4-ov
+        backend: ov_server
+        tier: balanced
+        ctx_limit: 28000
+      - id: mistral-small-3.2-24b-int4-ov
+        backend: ov_server
+        tier: best
+      - id: Qwen3-32B
+        backend: ovh
+        tier: best
+
+  document:
+    description: "Summarise or analyse a long document or pasted text"
+    # signal_only not set — reachable via long_context signal AND embedding routing
+    models:
+      - id: qwen3-8b-int4-ov
+        backend: ov_server
+        tier: fast
+        ctx_limit: 28000
+      - id: qwen3-14b-int4-ov
+        backend: ov_server
+        tier: balanced
+        ctx_limit: 28000
+      - id: mistral-small-3.2-24b-int4-ov
+        backend: ov_server
+        tier: best
+      - id: Qwen3-32B
+        backend: ovh
+        tier: fast
+      - id: gpt-oss-120b
+        backend: ovh
+        tier: best
+
+  code:
+    description: "Write, debug, explain, or refactor code"
+    models:
+      - id: qwen2.5-coder-14b-int4
+        backend: ov_server
+        tier: fast
+        ctx_limit: 28000
+      - id: mistral-small-3.2-24b-int4-ov
+        backend: ov_server
+        tier: balanced
+      - id: qwen3-coder-30b-a3b-int4-ov
+        backend: ov_server
+        tier: best
+      - id: Qwen3-Coder-30B-A3B-Instruct
+        backend: ovh
+        tier: best
+
+  general:
+    description: "General conversation, questions, opinions, advice, everyday topics, and open-ended reasoning"
+    examples:
+      - "what should I have for dinner"
+      - "recommend a book"
+      - "how do I stay motivated"
+      - "what is the weather like"
+      - "tell me a joke"
+      - "help me plan my weekend"
+      - "co zjeść na obiad"
+      - "jakie filmy warto obejrzeć"
+      - "jak zaplanować wakacje"
+    models:
+      - id: qwen3-8b-int4-ov
+        backend: ov_server
+        tier: fast
+        ctx_limit: 28000
+      - id: qwen3-14b-int4-ov
+        backend: ov_server
+        tier: balanced
+        ctx_limit: 28000
+      - id: mistral-small-3.2-24b-int4-ov
+        backend: ov_server
+        tier: best
+      - id: Qwen3-32B
+        backend: ovh
+        tier: best

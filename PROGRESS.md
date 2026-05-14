@@ -423,11 +423,21 @@
 
 ---
 
+### 2026-05-14 — Session 43 (TBD)
+**Working on:** infergate integration — config.yaml, OVServerBackend, OVEmbeddingProvider, wiring into ov_server.py, smoke tests
+**Last commit:** TBD
+**Next action:** remove redundant routing functions from router.py (cleanup pass); or write round 2 feedback when new infergate version ships
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) router.py legacy functions (_detect_signal, route_by_embedding, _select_model, _load_embedding_centroids) still present — redundant but harmless until cleanup pass.
+**Tests:** pass — 176/176
+
+---
+
 ## NOW
 
-**Working on:** Session 42 wrap — test fix, SVP Phase 5, infergate gap doc
-**Last commit:** da3c82d — docs: session wrap — test fix, SVP Phase 5 responsive+GPU bars, Charts race fix, infergate gap analysis
-**Next action:** free-form — infergate improvements tracked in plans/20260514_infergate_gaps.md
+**Working on:** infergate integration — wiring complete, all routing paths live
+**Last commit:** TBD
+**Next action:** router.py cleanup (remove replaced functions); or await infergate round 2 feedback cycle
 **Blocked on:** nothing
-**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
-**Tests:** pass — 176/176; build clean 125KB
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) router.py legacy routing functions redundant — schedule cleanup pass.
+**Tests:** pass — 176/176

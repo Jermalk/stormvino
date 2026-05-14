@@ -144,6 +144,18 @@ import image_pipeline
 import stt_pipeline
 import gpu_monitor
 
+# infergate routing integration
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).parent / 'infergate'))
+from ov_backend import OVServerBackend as _OVServerBackend
+from ov_embedding_provider import OVEmbeddingProvider as _OVEmbeddingProvider
+from infergate.config import RouterConfig as _IGRouterConfig
+from infergate.router import Router as _IGRouter
+from infergate.types import InferRequest as _IGInferRequest
+
+_ig_router: _IGRouter | None = None
+
 
 # ---------------------------------------------------------------------------
 # Server stats (health endpoint reads these — no lock needed, plain memory)
@@ -430,7 +442,20 @@ async def _startup_preload() -> None:
     await db.init_pool(_cfg.get("postgres_dsn"))
     await db.prune_old_events(days=30)
     await model_manager._preload_vram_measurements()  # warm _vram_measured from DB
-    await router._load_embedding_centroids()  # blocking — centroids before assessor
+    await router._load_embedding_centroids()  # loads emb_model into model_manager globals
+    global _ig_router
+    _ig_cfg = _IGRouterConfig.from_dict(
+        __import__('yaml').safe_load(
+            (_Path(__file__).parent / 'infergate' / 'config.yaml').read_text()
+        )
+    )
+    _ig_router = _IGRouter(
+        config=_ig_cfg,
+        backends={"ov_server": _OVServerBackend()},
+        embedding_provider=_OVEmbeddingProvider(),
+    )
+    await _ig_router.load_embeddings()
+    log.info("[infergate] router ready")
     asyncio.create_task(
         model_manager._load_assessor()
     )  # background — assessor pipeline
@@ -1029,48 +1054,51 @@ async def chat(req: ChatRequest):
             "model": model_id,
         }
     else:
-        # Stage 1: rule-based signal detection
-        task_class = router._detect_signal(req)
-        strategy = "rule"
-        if task_class is None and is_agent:
-            # AnythingLLM system-prompt tool selection — route to fast tool-capable model
-            task_class = "web_search"
-        elif task_class is None:
-            # Stage 2: embedding similarity — best match wins, no threshold gate
-            last_user_msg = next(
-                (_text_content(m) for m in reversed(req.messages) if m.role == "user"),
-                "",
-            )
-            task_class, score, emb_vec = await router.route_by_embedding(last_user_msg)
-            _route_confidence = round(score, 4)
-            _route_query_embedding = emb_vec
-            strategy = "embedding"
-
-        _route_task_class = task_class
-        _route_strategy = strategy
-        if strategy == "rule":
-            _route_confidence = 1.0
-        cplx = router.complexity_score(req)
-        est_tokens = sum(len(_text_content(m)) for m in req.messages) // 4
-
-        # Cloud directive: #ovh / #cloud in message → override scope + pref for this request.
+        # ── Cloud directive: ov_server-specific OVH proxy path ───────────────
         # Only active when OVH backend is configured; otherwise ignored silently.
         _ovh_configured = bool(_cfg.get("routing", {}).get("backends", {}).get("ovh"))
         _cloud_directive = _ovh_configured and router._has_cloud_directive(req.messages)
-        _scope_override = "local+ovh" if _cloud_directive else None
-        _pref_override = "best" if _cloud_directive else None
         if _cloud_directive:
             log.info("[router] #cloud directive — scope=local+ovh pref=best")
 
-        model_entry = router._select_model(
-            task_class,
-            active_profile_cfg,
-            cplx,
-            est_tokens,
-            scope_override=_scope_override,
-            pref_override=_pref_override,
+        # ── infergate routing ─────────────────────────────────────────────────
+        # AnythingLLM system-prompt agent: has tool-selection system prompt but no
+        # req.tools. Pass a synthetic tool so infergate routes to web_search,
+        # matching the original is_agent branch behaviour.
+        _anythinglm_agent = not req.tools and "picks the most optimal function" in _sys
+        _ig_tools: list[dict] | None = req.tools or ([{}] if _anythinglm_agent else None)
+
+        assert _ig_router is not None, "infergate router not initialised — startup error"
+        _ig_req = _IGInferRequest(
+            messages=[{"role": m.role, "content": m.content} for m in req.messages],
+            tools=_ig_tools,
         )
-        model_id = model_entry["id"]
+        decision = await _ig_router.decide(_ig_req)
+
+        task_class = decision.task_class
+        model_id = decision.model_id
+        strategy = decision.strategy.value
+        _route_task_class = task_class
+        _route_strategy = strategy
+        _route_confidence = decision.confidence
+        _route_query_embedding = decision.embedding
+
+        # Cloud directive: use infergate task_class but re-select model with OVH scope.
+        # OVH proxy is ov_server-specific; infergate only has the local backend registered.
+        if _cloud_directive:
+            cplx = router.complexity_score(req)
+            est_tokens = sum(len(_text_content(m)) for m in req.messages) // 4
+            model_entry = router._select_model(
+                task_class, active_profile_cfg, cplx, est_tokens,
+                scope_override="local+ovh", pref_override="best",
+            )
+            model_id = model_entry["id"]
+            strategy = "cloud_directive"
+            _route_strategy = strategy
+            _route_confidence = 1.0
+        else:
+            model_entry = {"id": model_id, "provider": "loc"}
+
         _task_directive = router.task_class_directive(req.messages)
         routing_decision = {
             "task_class": task_class,
@@ -1080,7 +1108,7 @@ async def chat(req: ChatRequest):
             "task_directive": _task_directive,
         }
         log.info(
-            f"[router] {strategy} → task_class='{task_class}' model='{model_id}'"
+            f"[infergate] {strategy} → task_class='{task_class}' model='{model_id}'"
             + (f" [#{_task_directive}]" if _task_directive else "")
             + (" [#cloud]" if _cloud_directive else "")
         )

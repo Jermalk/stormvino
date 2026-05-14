@@ -260,6 +260,11 @@ On re-entry: if non-empty, read aloud and ask user before proceeding (bootstrap 
 | `autotest/YYYYMMdd_<hash>.md` | PND recovery artifacts — live test and debug session logs |
 | `plans/YYYYMMdd_PLAN_<subject>.md` | Development plans — all plans live here, inside the repo |
 | `plans/YYYYMMdd_<subject>.sql` | SQL attachments referenced by plans |
+| `infergate/INFERGATE_USAGE.md` | infergate integration track — full story, adapter code, decisions, status |
+| `infergate/ov_backend.py` | `OVServerBackend` — `Backend` Protocol impl (routing-only, reads ov_server globals) |
+| `infergate/ov_embedding_provider.py` | `OVEmbeddingProvider` — `EmbeddingProvider` Protocol wrapping `emb_model` |
+| `infergate/config.yaml` | infergate routing config (mirrors `config.json` task_classes, infergate field names) |
+| `infergate/feedback/` (infergate repo) | Cross-session feedback loop — see INFERGATE_USAGE.md § Feedback loop |
 
 ---
 

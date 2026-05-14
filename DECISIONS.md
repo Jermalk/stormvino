@@ -6,6 +6,24 @@
 
 ---
 
+### 2026-05-14 — infergate integrated in routing-only mode
+**Decision:** Replace ov_server's routing chain (_detect_signal / route_by_embedding / _select_model) with infergate's Router.decide() while keeping ov_server's inference pipeline and OVH proxy logic intact.
+**Rationale:** Routing-only mode avoids touching the OpenVINO inference path. infergate handles signal detection, embedding routing, model selection, and complexity scoring behind a clean Protocol boundary. OVH cloud directive path stays in ov_server because it's an HTTP proxy operation with no library equivalent.
+**Rejected alternative:** Full adoption including chat() execution via Backend.chat() — rejected because ov_server's inference path (openvino_genai, VRAM eviction, streaming, prompt building) is too specialised to abstract into a library backend.
+**Affects:** ov_server.py (wiring), infergate/ov_backend.py, infergate/ov_embedding_provider.py, infergate/config.yaml
+
+### 2026-05-14 — infergate adapter files live in infergate/ subdirectory
+**Decision:** OVServerBackend and OVEmbeddingProvider live in /opt/ov_server/infergate/, added to sys.path at ov_server.py import time.
+**Rationale:** Keeps integration files co-located with config.yaml and INFERGATE_USAGE.md. The infergate/ name does not conflict with the PyPI package because Python resolves installed packages from site-packages, not the working directory subdirectory.
+**Rejected alternative:** Placing adapter files in /opt/ov_server/ root — clutters the root module namespace with integration-specific files.
+**Affects:** ov_server.py imports
+
+### 2026-05-14 — cross-session feedback loop established via infergate/feedback/
+**Decision:** ov_server session writes developer feedback letters to /home/jerzy/Dokumenty/Projects/infergate/feedback/ after each integration round; SIGNAL.md is the handoff flag; infergate session reads on re-entry.
+**Rationale:** Both repos live on the same machine. File-based protocol requires no tooling and is readable by a cold session with zero prior context. Structured round files capture positive signals (do not regress) alongside friction and proposals.
+**Rejected alternative:** GitHub issues or PR comments — adds tooling dependency; overkill for a two-session local loop.
+**Affects:** INFERGATE_USAGE.md, infergate/feedback/ (infergate repo)
+
 ### 2026-05-10 — Python coding standards adopted with risk triage
 **Decision:** coding_standards_python.json adopted after removing risky techniques and marking 2nd-order ones explicitly.
 **Rationale:** `closed=True` (Python 3.15+) and Zuban checker removed — incompatible with Python 3.12 environment. Async stack mocking removed — would mask real production bugs in AsyncTokenStreamer. 2nd-order techniques (TypedDict, Protocol, TypeVar) require explicit `apply_when` condition before use.
