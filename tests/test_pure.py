@@ -16,12 +16,13 @@ import pytest
 
 import ov_server
 import chat_handler
+import admin_routes
 import catalogue
 import router
 import model_manager
 import server_config
 
-from ov_server import _VALID_SCOPES
+from admin_routes import _VALID_SCOPES
 from chat_handler import _limit_image_history, _pick_backend_name
 from prompt_builder import (
     ContentPart,
@@ -995,7 +996,7 @@ class TestListModels:
             patch.object(model_manager, "loaded_vlm_models", {}),
             patch.dict(ov_server._cfg, _LOCAL_CFG),
         ):
-            resp = await ov_server.list_models()
+            resp = await admin_routes.list_models()
         assert resp["object"] == "list"
         assert isinstance(resp["data"], list)
 
@@ -1009,7 +1010,7 @@ class TestListModels:
             patch.object(model_manager, "loaded_vlm_models", {}),
             patch.dict(ov_server._cfg, _LOCAL_CFG),
         ):
-            resp = await ov_server.list_models()
+            resp = await admin_routes.list_models()
         assert resp["data"], "expected at least one entry"
         for entry in resp["data"]:
             assert _REQUIRED_MODEL_FIELDS <= entry.keys(), f"Missing fields in {entry}"
@@ -1024,7 +1025,7 @@ class TestListModels:
             patch.object(model_manager, "loaded_vlm_models", {}),
             patch.dict(ov_server._cfg, {"provider_scope": "local+ovh", "task_classes": {}}),
         ):
-            await ov_server.list_models()
+            await admin_routes.list_models()
         mock_refresh.assert_awaited_once_with("local+ovh")
 
     async def test_local_scope_excludes_ovh_cache(self):
@@ -1040,7 +1041,7 @@ class TestListModels:
             patch.object(model_manager, "loaded_vlm_models", {}),
             patch.dict(ov_server._cfg, _LOCAL_CFG),
         ):
-            resp = await ov_server.list_models()
+            resp = await admin_routes.list_models()
         assert not any(e["provider"] == "ovh" for e in resp["data"])
 
     async def test_local_plus_ovh_scope_includes_ovh_entries(self):
@@ -1056,7 +1057,7 @@ class TestListModels:
             patch.object(model_manager, "loaded_vlm_models", {}),
             patch.dict(ov_server._cfg, {"provider_scope": "local+ovh", "task_classes": {}}),
         ):
-            resp = await ov_server.list_models()
+            resp = await admin_routes.list_models()
         ids = [e["id"] for e in resp["data"]]
         assert "cloud-m" in ids
         assert any(e["provider"] == "ovh" for e in resp["data"])
@@ -1071,23 +1072,23 @@ class TestListModels:
             patch.object(model_manager, "loaded_vlm_models", {}),
             patch.dict(ov_server._cfg, _LOCAL_CFG),
         ):
-            resp = await ov_server.list_models()
+            resp = await admin_routes.list_models()
         by_id = {e["id"]: e for e in resp["data"]}
         assert by_id["hot"]["loaded"] is True
         assert by_id["cold"]["loaded"] is False
 
     async def test_default_scope_is_local_when_cfg_missing(self):
         mock_refresh = AsyncMock()
-        cfg_without_scope = {k: v for k, v in ov_server._cfg.items() if k != "provider_scope"}
+        cfg_without_scope = {k: v for k, v in admin_routes._cfg.items() if k != "provider_scope"}
         with (
             patch.object(catalogue, "_refresh_catalogue", mock_refresh),
             patch.object(catalogue, "AVAILABLE_MODELS", {}),
             patch.object(catalogue, "AVAILABLE_VLM_MODELS", {}),
             patch.object(model_manager, "loaded_models", {}),
             patch.object(model_manager, "loaded_vlm_models", {}),
-            patch.object(ov_server, "_cfg", cfg_without_scope),
+            patch.object(admin_routes, "_cfg", cfg_without_scope),
         ):
-            await ov_server.list_models()
+            await admin_routes.list_models()
         mock_refresh.assert_awaited_once_with("local")
 
 
@@ -1107,46 +1108,46 @@ class TestSetScope:
 
     async def test_valid_scope_returns_200(self):
         for scope in _VALID_SCOPES:
-            req = ov_server.ScopeRequest(scope=scope)
-            resp = await ov_server.set_scope(req)
+            req = admin_routes.ScopeRequest(scope=scope)
+            resp = await admin_routes.set_scope(req)
             assert resp.status_code == 200
 
     async def test_response_body_contains_new_scope(self):
         import json
-        req = ov_server.ScopeRequest(scope="local+ovh")
-        resp = await ov_server.set_scope(req)
+        req = admin_routes.ScopeRequest(scope="local+ovh")
+        resp = await admin_routes.set_scope(req)
         body = json.loads(resp.body)
         assert body["scope"] == "local+ovh"
 
     async def test_cfg_updated(self):
-        req = ov_server.ScopeRequest(scope="local+ovh")
-        await ov_server.set_scope(req)
+        req = admin_routes.ScopeRequest(scope="local+ovh")
+        await admin_routes.set_scope(req)
         assert ov_server._cfg["provider_scope"] == "local+ovh"
 
     async def test_cache_cleared_on_scope_change(self):
         catalogue._catalogue_cache["ovh"] = ([], time.time())
-        req = ov_server.ScopeRequest(scope="local+ovh")
-        await ov_server.set_scope(req)
+        req = admin_routes.ScopeRequest(scope="local+ovh")
+        await admin_routes.set_scope(req)
         assert "ovh" not in catalogue._catalogue_cache
 
     async def test_invalid_scope_raises_400(self):
         from fastapi import HTTPException
-        req = ov_server.ScopeRequest(scope="bogus")
+        req = admin_routes.ScopeRequest(scope="bogus")
         with pytest.raises(HTTPException) as exc_info:
-            await ov_server.set_scope(req)
+            await admin_routes.set_scope(req)
         assert exc_info.value.status_code == 400
 
     async def test_invalid_scope_error_mentions_valid_values(self):
         from fastapi import HTTPException
-        req = ov_server.ScopeRequest(scope="remote-only")
+        req = admin_routes.ScopeRequest(scope="remote-only")
         with pytest.raises(HTTPException) as exc_info:
-            await ov_server.set_scope(req)
+            await admin_routes.set_scope(req)
         assert "local" in exc_info.value.detail
 
     async def test_all_three_valid_scopes_accepted(self):
         for scope in ("local", "local+ovh", "all"):
-            req = ov_server.ScopeRequest(scope=scope)
-            resp = await ov_server.set_scope(req)
+            req = admin_routes.ScopeRequest(scope=scope)
+            resp = await admin_routes.set_scope(req)
             assert resp.status_code == 200
             assert ov_server._cfg["provider_scope"] == scope
 
@@ -1157,23 +1158,23 @@ class TestSetScope:
 
 def _make_req(messages, tools=None):
     """Build a minimal ChatRequest for signal-detector tests."""
-    return ov_server.ChatRequest(messages=messages, tools=tools)
+    return chat_handler.ChatRequest(messages=messages, tools=tools)
 
 
 def _user(text: str):
-    return ov_server.Message(role="user", content=text)
+    return Message(role="user", content=text)
 
 
 def _assistant(text: str):
-    return ov_server.Message(role="assistant", content=text)
+    return Message(role="assistant", content=text)
 
 
 def _image_msg():
-    part = ov_server.ContentPart(
+    part = ContentPart(
         type="image_url",
         image_url={"url": "data:image/png;base64,abc"},
     )
-    return ov_server.Message(role="user", content=[part])
+    return Message(role="user", content=[part])
 
 
 # ---------------------------------------------------------------------------
