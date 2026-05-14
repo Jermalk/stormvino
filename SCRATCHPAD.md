@@ -4,4 +4,4 @@
 > Format: bullet points, max 5 lines per topic, no prose.
 
 ## Carried over:
-Session 45: infergate 0.1.3 confirmed in venv (wheel). SIGNAL.md was RELEASE READY. round_03_v0.1.3.md written — P1: Router.reselect() for cloud directive re-selection (unblocks router._select_model deletion), P2: RouteDecision.task_directive field (unblocks router.task_class_directive deletion). SIGNAL.md cycled → FEEDBACK READY. PROGRESS.md updated. Waiting for infergate session to ship v0.1.4.
+Session 46: Kaizen plan fully complete (all phases A–F done in prior sessions). Observability Phase 1 also fully done (DB live, 460+ events, all endpoints). Missing piece was db.py unit tests — written and passing (26 new tests, total 179/179). pytest-asyncio 1.3.0 installed, asyncio_mode=auto added to pytest.ini. write_centroid_snapshot defined in db.py but never called (centroid computation moved to infergate — future concern). Next: VRAM profiler Step 1 OR wait for infergate v0.1.4.

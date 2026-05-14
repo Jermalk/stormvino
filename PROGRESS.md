@@ -445,9 +445,9 @@
 
 ## NOW
 
-**Working on:** infergate round 3 feedback written — waiting for infergate session to ship v0.1.4
-**Last commit:** bd2e501 — refactor: remove router.py functions replaced by infergate
-**Next action:** on re-entry check SIGNAL.md; if RELEASE READY upgrade venv and delete router.py residuals (complexity_score, _has_cloud_directive, task_class_directive, _select_model)
+**Working on:** Observability Phase 1 complete — db tests written; next is VRAM profiler
+**Last commit:** 8d018f4 — test: db.py unit tests — 26 tests covering pool, writes, queries
+**Next action:** check SIGNAL.md on re-entry; if RELEASE READY upgrade venv; then start VRAM profiler Step 1
 **Blocked on:** infergate P1 (Router.reselect) and P2 (RouteDecision.task_directive) — blocks router.py full removal
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
-**Tests:** pass — 153/153
+**Tests:** pass — 179/179
