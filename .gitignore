@@ -12,3 +12,9 @@ models/
 # environment files
 .env
 ov_cache/
+
+# personal tool config
+.aider.conf.yml
+
+# PND session logs (internal debug/test session artifacts)
+dev/autotest/*.md
