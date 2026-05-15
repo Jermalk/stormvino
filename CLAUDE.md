@@ -264,7 +264,9 @@ On re-entry: if non-empty, read aloud and ask user before proceeding (bootstrap 
 | `SCRATCHPAD.md` | In-session working memory |
 | `SESSION.md` | Crash-recovery snapshot — empty = clean close; non-empty = broken session |
 | `CLAUDE-ref.md` | Reference detail (Tool-Call Gap, Qwen format) — load only on explicit request |
-| `CLAUDE-changes.md` | Audit log of every change made to this file |
+| `gpu_monitor.py` | GPU hardware metrics poller (temperature, power, VRAM via sysfs/XE driver); imported by `admin_routes.py`, started by `ov_server.py` |
+| `monitor_sidecar.py` | Standalone HTTP server on `:11436` — GPU metrics + health proxy for SVP monitor; survives server restarts |
+| `Docker.md` | Docker run commands for Open WebUI + SearxNG containers |
 | `autotest/YYYYMMdd_<hash>.md` | PND recovery artifacts — live test and debug session logs |
 | `plans/YYYYMMdd_PLAN_<subject>.md` | Development plans — all plans live here, inside the repo |
 | `plans/YYYYMMdd_<subject>.sql` | SQL attachments referenced by plans |
