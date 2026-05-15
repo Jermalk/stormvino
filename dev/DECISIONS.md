@@ -511,3 +511,9 @@
 **Rationale:** /no_think is a Qwen3 model directive that has no meaning for Mistral or VLM models. Injecting it there is noise that could confuse non-Qwen models.
 **Rejected alternative:** Universal injection — would litter Mistral and VLM prompts with a meaningless token.
 **Affects:** prompt_builder.py
+
+### 2026-05-15 — NoModelAvailable caught at chat_handler boundary
+**Decision:** Wrap ig_router.decide() in a try/except for NoModelAvailable and fall back via reselect('general', scope='local') rather than letting a 500 propagate.
+**Rationale:** infergate's decide() raises NoModelAvailable when scope='remote' and no remote backend is registered — triggered by #cloud when OVH is not configured or unreachable. The server must degrade gracefully; a 500 is unacceptable for a scope mismatch.
+**Rejected alternative:** Patch infergate's _fallback() to retry with local scope — not our code; feedback filed instead.
+**Affects:** chat_handler.py

@@ -553,11 +553,21 @@
 
 ---
 
-## NOW
-
-**Working on:** Server-side system prefix — date injection + OpenAI-compliant /no_think handling
-**Last commit:** aafa7d6 — feat: server-side system prefix — date injection + clean /no_think
+### 2026-05-15 — Session 58 (79ec77d)
+**Working on:** Routing battle test — 49 tests across signals, model selection, scope, complexity, edge cases; live integration suite
+**Last commit:** 79ec77d — test: routing battle test (49 tests) + fix NoModelAvailable in chat handler
 **Next action:** user-directed; PLAN_future Phase 3 (news scraper) or PLAN_platform (pgvector RAG)
 **Blocked on:** nothing
-**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
-**Tests:** pass — 159/159
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart. (4) _pick_backend_name() is dead code in chat_handler.py — cleanup deferred.
+**Tests:** pass — 193/193 (38 new routing tests added; 4 skipped; 11 live pass)
+
+---
+
+## NOW
+
+**Working on:** Routing battle test — 49 tests across signals, model selection, scope, complexity, edge cases; live integration suite
+**Last commit:** 79ec77d — test: routing battle test (49 tests) + fix NoModelAvailable in chat handler
+**Next action:** user-directed; PLAN_future Phase 3 (news scraper) or PLAN_platform (pgvector RAG)
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart. (4) _pick_backend_name() is dead code in chat_handler.py — cleanup deferred.
+**Tests:** pass — 193/193 (38 new routing tests; 4 skipped; 11 live pass)
