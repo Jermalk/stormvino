@@ -382,11 +382,6 @@ async def _chat_vlm(req: ChatRequest):
 # ---------------------------------------------------------------------------
 # Backend selection and OVH proxy
 # ---------------------------------------------------------------------------
-def _pick_backend_name(model: str) -> str:
-    routing = _cfg.get("routing", {})
-    return routing.get("model_map", {}).get(model, routing.get("default", "local"))
-
-
 async def _proxy_chat(req: ChatRequest, spec: dict) -> StreamingResponse | JSONResponse:
     """Forward a ChatRequest to an OpenAI-compat backend defined in routing.backends."""
     base_url = spec["base_url"].rstrip("/")

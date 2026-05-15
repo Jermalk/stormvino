@@ -469,23 +469,15 @@ class TestComplexityScore:
 class TestDeadCodeAndEdgeCases:
     """Catches silent degradation, dead code, and implicit ordering bugs."""
 
-    def test_pick_backend_name_is_dead_code(self):
-        """_pick_backend_name() is defined in chat_handler but never called — dead code."""
+    def test_pick_backend_name_removed(self):
+        """_pick_backend_name() was dead code — verify it no longer exists in chat_handler."""
         import ast
         import pathlib
         src = pathlib.Path("/opt/ov_server/chat_handler.py").read_text()
         tree = ast.parse(src)
         defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
-        called = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Name):
-                    called.add(node.func.id)
-                elif isinstance(node.func, ast.Attribute):
-                    called.add(node.func.attr)
-        assert "_pick_backend_name" in defined, "_pick_backend_name was removed — test is stale"
-        assert "_pick_backend_name" not in called, (
-            "_pick_backend_name is now called — update this test and remove the dead-code warning"
+        assert "_pick_backend_name" not in defined, (
+            "_pick_backend_name was re-added — it is dead code, remove it"
         )
 
     def test_reselect_scope_local_plus_remote_allows_all_backends(self):

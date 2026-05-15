@@ -23,7 +23,7 @@ import model_manager
 import server_config
 
 from admin_routes import _VALID_SCOPES
-from chat_handler import _limit_image_history, _pick_backend_name
+from chat_handler import _limit_image_history
 from prompt_builder import (
     ContentPart,
     Message,
@@ -395,34 +395,6 @@ class TestLimitImageHistory:
         assert result[0].content == "text1"
         assert result[2].content == "text2"
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# _pick_backend_name
-# ──────────────────────────────────────────────────────────────────────────────
-
-class TestPickBackendName:
-    def _with_routing(self, routing: dict):
-        with patch.dict(ov_server._cfg, {"routing": routing}):
-            yield
-
-    def test_default_local(self):
-        routing = {"default": "local", "model_map": {}}
-        with patch.dict(ov_server._cfg, {"routing": routing}):
-            assert _pick_backend_name("any-model") == "local"
-
-    def test_model_in_model_map(self):
-        routing = {"default": "local", "model_map": {"gpt-4": "ovh"}}
-        with patch.dict(ov_server._cfg, {"routing": routing}):
-            assert _pick_backend_name("gpt-4") == "ovh"
-
-    def test_unknown_model_uses_default(self):
-        routing = {"default": "ovh", "model_map": {"specific": "local"}}
-        with patch.dict(ov_server._cfg, {"routing": routing}):
-            assert _pick_backend_name("other-model") == "ovh"
-
-    def test_empty_routing_config(self):
-        with patch.dict(ov_server._cfg, {"routing": {}}):
-            assert _pick_backend_name("any") == "local"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
