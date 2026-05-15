@@ -59,7 +59,7 @@ from server_config import (
 
 # infergate — sys.path already extended by ov_server.py before this module is imported
 from infergate import signals as _ig_signals
-from infergate.types import InferRequest as _IGInferRequest
+from infergate.types import InferRequest as _IGInferRequest, NoModelAvailable as _IGNoModelAvailable
 
 log = logging.getLogger("ov_server")
 
@@ -534,11 +534,17 @@ async def chat(req: ChatRequest):
             .get("model_preference", "fastest")
         )
         _ig_req = _IGInferRequest(messages=_ig_messages, tools=_ig_tools)
-        decision = await app_state.ig_router.decide(
-            _ig_req,
-            trace=app_state.debug_logging,
-            force_tier=None if _prof_pref == "fastest" else _prof_pref,
-        )
+        try:
+            decision = await app_state.ig_router.decide(
+                _ig_req,
+                trace=app_state.debug_logging,
+                force_tier=None if _prof_pref == "fastest" else _prof_pref,
+            )
+        except _IGNoModelAvailable as _exc:
+            log.warning(f"[router] no model available for scope/task: {_exc} — local fallback")
+            decision = app_state.ig_router.reselect(
+                task_class="general", scope="local", force_tier=None
+            )
 
         task_class = decision.task_class
         model_id = decision.model_id
