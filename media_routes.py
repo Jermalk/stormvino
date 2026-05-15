@@ -5,12 +5,16 @@ Imports: server_config, image_pipeline, stt_pipeline, tts_pipeline.
 To add a new media type: add a new endpoint function and register its router in ov_server.py.
 """
 import logging
+import re
 import time
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
+
+# Piper voice names look like: pl_PL-gosia-medium, en_US-amy-medium
+_PIPER_VOICE_RE = re.compile(r"^[a-z]{2}_[A-Z]{2}-")
 
 import image_pipeline
 import stt_pipeline
@@ -133,9 +137,11 @@ async def audio_transcriptions(
 
 @media_router.post("/v1/audio/speech")
 async def audio_speech(req: TTSSpeechRequest):
-    tts_model_dir = _cfg.get("tts_model_dir", "piper")
-    model_dir = str(Path(MODELS_DIR) / tts_model_dir)
-    voice_name = req.voice or _cfg.get("tts_voice", "en_US-lessac-medium")
+    voice_name = req.voice or _cfg.get("tts_voice", "af_kore")
+    if _PIPER_VOICE_RE.match(voice_name):
+        model_dir = str(Path(MODELS_DIR) / "piper")
+    else:
+        model_dir = str(Path(MODELS_DIR) / _cfg.get("tts_model_dir", "kokoro"))
 
     if not Path(model_dir).exists():
         raise HTTPException(

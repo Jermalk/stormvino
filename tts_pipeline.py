@@ -5,8 +5,8 @@ Backend is auto-detected from model_dir:
   - contains kokoro-v1.0.onnx → kokoro-onnx (24 kHz, higher quality)
   - otherwise → piper-tts (22050 Hz)
 
-Lazy-loads on first request and keeps the model in memory.
-Synthesis runs in a thread executor (CPU-bound).
+Multiple engines can be loaded simultaneously (e.g. kokoro for English,
+piper for Polish). Each is lazy-loaded on first use and kept in memory.
 Never import from ov_server.py or chat_handler.py.
 """
 import asyncio
@@ -18,29 +18,38 @@ from pathlib import Path
 
 log = logging.getLogger("ov_server")
 
-_engine = None          # Kokoro instance or PiperVoice instance
-_engine_lock = asyncio.Lock()
-_backend: str = ""      # "kokoro" | "piper"
-_voice_name: str = ""
+# keyed by model_dir path
+_engines: dict[str, object] = {}
+_backends: dict[str, str] = {}      # model_dir → "kokoro" | "piper"
+_locks: dict[str, asyncio.Lock] = {}
 
 
 def is_loaded() -> bool:
-    return _engine is not None
+    return bool(_engines)
 
 
 def loaded_voice() -> str:
-    return _voice_name
+    return ", ".join(
+        f"{_backends[d]}:{Path(d).name}" for d in _engines
+    )
 
 
 def _detect_backend(model_dir: str) -> str:
     return "kokoro" if (Path(model_dir) / "kokoro-v1.0.onnx").exists() else "piper"
 
 
-async def _get_engine(model_dir: str, voice_name: str):
-    global _engine, _backend, _voice_name
-    async with _engine_lock:
-        if _engine is not None:
-            return _engine
+def _get_lock(model_dir: str) -> asyncio.Lock:
+    if model_dir not in _locks:
+        _locks[model_dir] = asyncio.Lock()
+    return _locks[model_dir]
+
+
+async def _get_engine(model_dir: str, voice_name: str) -> object:
+    lock = _get_lock(model_dir)
+    async with lock:
+        if model_dir in _engines:
+            return _engines[model_dir]
+
         backend = _detect_backend(model_dir)
         loop = asyncio.get_running_loop()
         log.info(f"Loading TTS engine '{backend}' voice='{voice_name}' from {model_dir}...")
@@ -50,35 +59,34 @@ async def _get_engine(model_dir: str, voice_name: str):
             onnx_path = str(Path(model_dir) / "kokoro-v1.0.onnx")
             voices_path = str(Path(model_dir) / "voices-v1.0.bin")
 
-            def _load_kokoro():
+            def _load():
                 from kokoro_onnx import Kokoro
                 return Kokoro(onnx_path, voices_path)
 
-            _engine = await loop.run_in_executor(None, _load_kokoro)
         else:
             onnx_path = Path(model_dir) / f"{voice_name}.onnx"
             json_path = Path(model_dir) / f"{voice_name}.onnx.json"
             if not onnx_path.exists():
                 raise FileNotFoundError(f"Piper voice model not found: {onnx_path}")
 
-            def _load_piper():
+            def _load():
                 from piper import PiperVoice
                 return PiperVoice.load(str(onnx_path), config_path=str(json_path), use_cuda=False)
 
-            _engine = await loop.run_in_executor(None, _load_piper)
-
-        _backend = backend
-        _voice_name = voice_name
+        engine = await loop.run_in_executor(None, _load)
+        _engines[model_dir] = engine
+        _backends[model_dir] = backend
         log.info(f"TTS engine loaded in {time.perf_counter() - t0:.1f}s")
-        return _engine
+        return engine
 
 
 async def synthesize(text: str, model_dir: str, voice_name: str) -> bytes:
     """Synthesize text → WAV bytes."""
     engine = await _get_engine(model_dir, voice_name)
+    backend = _backends[model_dir]
     loop = asyncio.get_running_loop()
 
-    if _backend == "kokoro":
+    if backend == "kokoro":
         def _run() -> bytes:
             import numpy as np
             t0 = time.perf_counter()
