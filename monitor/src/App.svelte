@@ -11,11 +11,29 @@
   import ModelCataloguePanel  from './lib/ModelCataloguePanel.svelte'
 
   // Sidecar is the primary data source: health + system + live VRAM.
-  let metrics  = $state(null)
-  let profiler = $state(null)
-  let error    = $state(null)
-  let timers   = []
-  let clockStr = $state(new Date().toLocaleTimeString())
+  let metrics        = $state(null)
+  let profiler       = $state(null)
+  let error          = $state(null)
+  let timers         = []
+  let clockStr       = $state(new Date().toLocaleTimeString())
+  let loadingOverride = $state(false)
+
+  // Set immediately when the user triggers a loading action (profile switch, restart).
+  // Clears automatically once health reports stable — all loading flags gone and
+  // startup_loading is false. Stays true while server is offline (health == null).
+  function onActionStart() { loadingOverride = true }
+
+  $effect(() => {
+    if (
+      loadingOverride &&
+      health != null &&
+      !health.loading_model_id &&
+      !health.profile_switching &&
+      !health.startup_loading
+    ) {
+      loadingOverride = false
+    }
+  })
 
   // Derived views used by child panels (same shape as before).
   const health   = $derived(metrics?.server_health ?? null)
@@ -58,14 +76,14 @@
 
   <!-- Row 1: VRAM bar -->
   <div class="vram-row">
-    <VramBar {health} {vramLive} />
+    <VramBar {health} {vramLive} overrideLoading={loadingOverride} />
   </div>
 
   <!-- Row 2: Server (40%) · Arc B60 (30%) · Profiles (30%) -->
   <div class="row tri">
     <div class="cell"><ServerPanel {health} /></div>
     <div class="cell"><GpuPanel {sys} /></div>
-    <div class="cell"><ProfilesPanel {health} /></div>
+    <div class="cell"><ProfilesPanel {health} {onActionStart} /></div>
   </div>
 
   <!-- Row 3: CPU + Memory (50%) · Model usage (50%) -->

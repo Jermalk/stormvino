@@ -1,7 +1,7 @@
 <script>
   import { switchProfile, switchScope } from './api.js'
 
-  let { health } = $props()
+  let { health, onActionStart } = $props()
 
   const PROFILES = [
     { name: 'fast',      label: 'Fast'      },
@@ -28,6 +28,7 @@
 
   async function setProfile(name) {
     if (busy || restarting) return
+    onActionStart()
     busy = true
     await switchProfile(name).catch(() => {})
     busy = false
@@ -43,6 +44,7 @@
 
   async function restart() {
     if (restarting) return
+    onActionStart()
     restarting = true
     await fetch('/maintenance/restart', { method: 'POST' }).catch(() => {})
     // Wait for server to go down, then poll until it's back

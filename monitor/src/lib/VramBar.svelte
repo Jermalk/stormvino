@@ -1,7 +1,7 @@
 <script>
   const COLORS = ['#4e9af1', '#9b6ef3', '#4ef1a0', '#f7c44e', '#f1544e']
 
-  let { health, vramLive } = $props()
+  let { health, vramLive, overrideLoading = false } = $props()
 
   // Use sidecar's live VRAM for total/used; fall back to health if sidecar not yet ready.
   const totalGb = $derived(health?.vram_total_gb ?? vramLive?.total_gb ?? 22.71)
@@ -39,10 +39,12 @@
   // so threshold at 1.2 GB to avoid false animation at idle.
   const loadingGb  = $derived(Math.max(0, liveServerGb - allocatedSum))
 
-  // Canonical loading flag — explicit server signals take priority.
-  // loadingGb > 1.2 is the belt-and-suspenders fallback for the brief gap
-  // before the server sets loading_model_id (e.g. task scheduled but not yet run).
+  // Canonical loading flag.
+  // overrideLoading is set immediately by user actions (profile switch, restart)
+  // so the animation fires before the server has a chance to update its state.
+  // The server flags and loadingGb heuristic cover all other cases.
   const isLoading = $derived(
+    overrideLoading ||
     !!(health?.loading_model_id) ||
     !!(health?.profile_switching) ||
     !!(health?.startup_loading) ||
