@@ -50,6 +50,14 @@
     "tts_model_dir":   "kokoro",
     "tts_voice":       "af_kore",
 
+    "plugins": {
+        "web_search": {
+            "enabled":     true,
+            "results":     5,
+            "searxng_url": null
+        }
+    },
+
     "news": {
         "searxng_url":          "http://localhost:8080",
         "topics":               ["artificial intelligence", "technology news", "world news"],

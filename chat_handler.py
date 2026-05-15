@@ -29,6 +29,7 @@ import app_state
 import catalogue
 import db
 import model_manager
+import plugin_runner
 import router
 from prompt_builder import (
     Message,
@@ -662,8 +663,30 @@ async def chat(req: ChatRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    # ── Plugin runner ─────────────────────────────────────────────────────────
+    # Extract last user turn, run registered plugins, inject context as a
+    # synthetic system message directly before the user turn.
+    _last_user_text = next(
+        (_text_content(m) for m in reversed(req.messages) if m.role == "user"), ""
+    )
+    _plugin_name, _plugin_context = await plugin_runner.run(_last_user_text, _cfg)
+    if _plugin_context:
+        _last_user_idx = next(
+            (i for i in range(len(req.messages) - 1, -1, -1)
+             if req.messages[i].role == "user"),
+            len(req.messages),
+        )
+        _messages_for_llm = (
+            list(req.messages[:_last_user_idx])
+            + [Message(role="system", content=_plugin_context)]
+            + list(req.messages[_last_user_idx:])
+        )
+        log.info(f"[plugin:{_plugin_name}] context injected ({len(_plugin_context)} chars)")
+    else:
+        _messages_for_llm = req.messages
+
     prompt = build_prompt(
-        req.messages, tokenizer, tools=req.tools, thinking=effective_thinking
+        _messages_for_llm, tokenizer, tools=req.tools, thinking=effective_thinking
     )
     if app_state.debug_logging:
         log.info(
