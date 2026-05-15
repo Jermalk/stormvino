@@ -9,6 +9,7 @@
   import Charts               from './lib/Charts.svelte'
   import ModelUsage           from './lib/ModelUsage.svelte'
   import ModelCataloguePanel  from './lib/ModelCataloguePanel.svelte'
+  import VoiceButton          from './lib/VoiceButton.svelte'
 
   // Sidecar is the primary data source: health + system + live VRAM.
   let metrics        = $state(null)
@@ -102,6 +103,8 @@
     <Charts />
   </div>
 </div>
+
+<VoiceButton />
 
 <style>
   :global(*) { box-sizing: border-box; margin: 0; padding: 0; }
