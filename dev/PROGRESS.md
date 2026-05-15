@@ -575,11 +575,21 @@
 
 ---
 
+### 2026-05-15 — Session 60 (9517eac)
+**Working on:** Voice pipeline, plugin architecture, VoiceButton polish
+**Last commit:** 9517eac — feat: VAD silence detection + TTS stop button in VoiceButton
+**Next action:** `dev/PLAN_plugin_infergate.md` — Step 1 (extend BasePlugin with task_class_trigger)
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
+**Tests:** pass — 155/155
+
+---
+
 ## NOW
 
-**Working on:** Plugin architecture PoC + VoiceButton SVP — complete
-**Last commit:** bb41e90 — feat: plugin architecture PoC — WebSearchPlugin via SearxNG
+**Working on:** Session 60 wrap — voice pipeline + plugin PoC complete
+**Last commit:** 9517eac — feat: VAD silence detection + TTS stop button in VoiceButton
 **Next action:** `dev/PLAN_plugin_infergate.md` — Step 1 (extend BasePlugin with task_class_trigger)
-**Blocked on:** nothing — plan written, ready to execute next session
+**Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
-**Tests:** pass — 189/189
+**Tests:** pass — 155/155
