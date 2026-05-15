@@ -487,3 +487,15 @@
 **Rationale:** No way to tune embedding_cache_size without aggregate hit/miss data. Per-request trace is too expensive to run in production. /health is polled by ov_monitor — cache stats land there automatically.
 **Rejected alternative:** Expose via /metrics/summary only — /health is the primary polling target; putting it there makes it visible to all consumers without extra requests.
 **Affects:** admin_routes.py
+
+### 2026-05-15 — TTS backend: kokoro-onnx for English, piper for other languages
+**Decision:** Use kokoro-onnx (af_kore, 24 kHz) as default English TTS; piper-tts for Polish and other languages. Both engines loaded lazily and held simultaneously in tts_pipeline.py.
+**Rationale:** Kokoro produces noticeably more natural English speech than piper (tested all 15 female voices). Piper remains the practical choice for Polish (pl_PL-gosia-medium) as kokoro is English-only. Auto-routing by voice name prefix (xx_XX- → piper dir) avoids adding a language parameter.
+**Rejected alternative:** Single-backend approach — would require switching the entire engine on language change, losing the concurrently-loaded benefit.
+**Affects:** tts_pipeline.py, media_routes.py, config.json
+
+### 2026-05-15 — kokoro-onnx over kokoro (PyTorch) package
+**Decision:** Use kokoro-onnx (ONNX runtime) instead of the kokoro PyTorch package.
+**Rationale:** The kokoro PyTorch package pulls in spacy, which imports our local catalogue.py instead of the spacy catalogue package (shadowing by cwd). kokoro-onnx has minimal deps (onnxruntime, phonemizer) and avoids the collision entirely.
+**Rejected alternative:** Manipulate sys.path to fix shadowing — fragile; kokoro-onnx is the cleaner solution.
+**Affects:** tts_pipeline.py
