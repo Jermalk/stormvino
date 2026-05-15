@@ -1,7 +1,7 @@
-"""Owns /v1/images/generations and /v1/audio/transcriptions endpoints.
+"""Owns /v1/images/generations, /v1/audio/transcriptions, /v1/audio/speech endpoints.
 
 Never import from ov_server.py or chat_handler.py.
-Imports: server_config, image_pipeline, stt_pipeline.
+Imports: server_config, image_pipeline, stt_pipeline, tts_pipeline.
 To add a new media type: add a new endpoint function and register its router in ov_server.py.
 """
 import logging
@@ -9,11 +9,12 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
 
 import image_pipeline
 import stt_pipeline
+import tts_pipeline
 from server_config import DEVICE, MODELS_DIR, _cfg
 
 log = logging.getLogger("ov_server")
@@ -40,6 +41,14 @@ class AudioTranscriptionRequest(BaseModel):
     response_format: str = "json"
     task: str = "transcribe"
     temperature: float | None = None
+
+
+class TTSSpeechRequest(BaseModel):
+    model: str = "piper"
+    input: str
+    voice: str = ""
+    response_format: str = "wav"
+    speed: float = 1.0
 
 
 @media_router.post("/v1/images/generations")
@@ -120,3 +129,32 @@ async def audio_transcriptions(
     if response_format == "text":
         return PlainTextResponse(text)
     return {"text": text}
+
+
+@media_router.post("/v1/audio/speech")
+async def audio_speech(req: TTSSpeechRequest):
+    tts_model_dir = _cfg.get("tts_model_dir", "piper")
+    model_dir = str(Path(MODELS_DIR) / tts_model_dir)
+    voice_name = req.voice or _cfg.get("tts_voice", "en_US-lessac-medium")
+
+    if not Path(model_dir).exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"TTS model dir '{model_dir}' not found",
+        )
+    if not req.input or not req.input.strip():
+        raise HTTPException(status_code=400, detail="'input' must not be empty")
+
+    try:
+        wav_bytes = await tts_pipeline.synthesize(
+            text=req.input,
+            model_dir=model_dir,
+            voice_name=voice_name,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        log.error(f"TTS synthesis error: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return Response(content=wav_bytes, media_type="audio/wav")

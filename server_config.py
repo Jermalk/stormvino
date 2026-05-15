@@ -115,8 +115,16 @@ _KNOWN_CONFIG_KEYS: frozenset[str] = frozenset({
     "profiles", "task_classes", "postgres_dsn",
     # legacy compat — tolerated without warning until Step 2.4
     "default_model", "agent_model", "max_new_tokens_agent", "routing",
+    # image generation
+    "image_model", "image_device", "image_num_steps",
+    # stt
+    "stt_model", "stt_device",
+    # tts
+    "tts_model_dir", "tts_voice",
     # safety
     "blocked_models",
+    # timing
+    "inference_timeout_sec", "usd_to_pln",
 })
 
 

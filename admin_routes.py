@@ -3,7 +3,7 @@
 Also owns _apply_profile() — profile-switching orchestration.
 Never import from ov_server.py or chat_handler.py.
 Imports: app_state, server_config, model_manager, catalogue, router, db, gpu_monitor,
-         image_pipeline, stt_pipeline.
+         image_pipeline, stt_pipeline, tts_pipeline.
 To add a new admin action: add a route here; to add a new profile behaviour: extend _apply_profile().
 """
 import asyncio
@@ -27,6 +27,7 @@ import image_pipeline
 import model_manager
 import router
 import stt_pipeline
+import tts_pipeline
 from server_config import (
     AVAILABLE_MODELS,
     AVAILABLE_VLM_MODELS,
@@ -188,6 +189,8 @@ async def health():
         "image_model_loaded": image_pipeline.is_loaded(),
         "image_model_id": image_pipeline.loaded_model_id(),
         "stt_model_loaded": stt_pipeline.is_loaded(),
+        "tts_voice_loaded": tts_pipeline.is_loaded(),
+        "tts_voice_id": tts_pipeline.loaded_voice(),
         "vram_total_gb": (
             round(model_manager._TOTAL_VRAM_GB, 2)
             if model_manager._TOTAL_VRAM_GB

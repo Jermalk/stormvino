@@ -47,6 +47,9 @@
     "stt_model":       "whisper-large-v3-int8-ov",
     "stt_device":      "GPU.1",
 
+    "tts_model_dir":   "piper",
+    "tts_voice":       "en_US-lessac-medium",
+
     "model_kv_overrides": {},
 
     "assessor": {
