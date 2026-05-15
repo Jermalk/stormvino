@@ -6,6 +6,7 @@
   let lastText   = $state('')       // last transcription
   let lastReply  = $state('')       // last LLM reply
   let errMsg     = $state('')
+  let sttLang    = $state('auto')   // 'auto' | 'en' | 'pl'
 
   let mediaRecorder = null
   let chunks        = []
@@ -72,9 +73,10 @@
       await ctx.close()
       const wavBlob = audioBufferToWav(audioBuf)
 
-      // STT
+      // STT — pass language hint so Whisper doesn't guess wrong
       const fd = new FormData()
       fd.append('file', wavBlob, 'recording.wav')
+      if (sttLang !== 'auto') fd.append('language', sttLang)
       const sttR = await fetch('/v1/audio/transcriptions', { method: 'POST', body: fd })
       if (!sttR.ok) throw new Error(`STT ${sttR.status}`)
       const sttJ  = await sttR.json()
@@ -102,7 +104,7 @@
       lastReply = chatJ.choices?.[0]?.message?.content?.trim() || ''
       if (!lastReply) { voiceState = 'idle'; return }
 
-      // TTS
+      // TTS — server auto-detects language from diacritics in reply
       const ttsR = await fetch('/v1/audio/speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -129,6 +131,10 @@
     // processing / playing: ignore
   }
 
+  function cycleLang() {
+    sttLang = sttLang === 'auto' ? 'en' : sttLang === 'en' ? 'pl' : 'auto'
+  }
+
   // ── Derived helpers ───────────────────────────────────────────────────────
   const icon = $derived({
     idle:       '🎤',
@@ -145,6 +151,8 @@
     playing:    'Playing…',
     error:      errMsg || 'Error — click to retry',
   }[voiceState] ?? '')
+
+  const langLabel = $derived(sttLang === 'auto' ? 'auto' : sttLang.toUpperCase())
 </script>
 
 <!-- Floating button + bubble -->
@@ -160,14 +168,19 @@
     </div>
   {/if}
 
-  <button
-    class="fab {voiceState}"
-    onclick={handleClick}
-    title={label}
-    disabled={voiceState === 'processing' || voiceState === 'playing'}
-  >
-    {icon}
-  </button>
+  <div class="fab-row">
+    <button class="lang-toggle" onclick={cycleLang} title="Cycle STT language hint (auto → EN → PL)">
+      {langLabel}
+    </button>
+    <button
+      class="fab {voiceState}"
+      onclick={handleClick}
+      title={label}
+      disabled={voiceState === 'processing' || voiceState === 'playing'}
+    >
+      {icon}
+    </button>
+  </div>
   <span class="fab-label">{label}</span>
 </div>
 
@@ -206,6 +219,28 @@
   }
   .q .label { color: #4e9af1; }
   .a .label { color: #4ef1a0; }
+
+  .fab-row {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+  }
+
+  .lang-toggle {
+    height: 1.6rem;
+    padding: 0 .5rem;
+    border-radius: .4rem;
+    border: 1px solid #ffffff22;
+    background: #1e2230;
+    color: #c8ccd8;
+    font-size: .65rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    cursor: pointer;
+    opacity: .6;
+    transition: opacity .15s, border-color .15s;
+  }
+  .lang-toggle:hover { opacity: 1; border-color: #4e9af188; }
 
   .fab {
     width: 3.25rem;

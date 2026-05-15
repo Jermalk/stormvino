@@ -185,15 +185,18 @@ def record_until_silence(
 # STT — POST /v1/audio/transcriptions
 # ---------------------------------------------------------------------------
 
-def transcribe(audio: np.ndarray, sample_rate: int, server: str) -> str:
+def transcribe(audio: np.ndarray, sample_rate: int, server: str, lang: str | None = None) -> str:
     buf = io.BytesIO()
     sf.write(buf, audio, sample_rate, format="WAV", subtype="PCM_16")
     buf.seek(0)
+    data: dict = {"model": "whisper"}
+    if lang:
+        data["language"] = lang
     try:
         r = httpx.post(
             f"{server}/v1/audio/transcriptions",
             files={"file": ("utterance.wav", buf, "audio/wav")},
-            data={"model": "whisper"},
+            data=data,
             timeout=30.0,
         )
         r.raise_for_status()
@@ -386,7 +389,8 @@ def main() -> None:
             continue
 
         info("Transcribing…")
-        text = transcribe(audio, sample_rate, cfg["server"])
+        stt_lang = cfg.get("tts_lang") if cfg.get("tts_lang") != "en" else None
+        text = transcribe(audio, sample_rate, cfg["server"], lang=stt_lang)
         if not text:
             info("(could not transcribe)")
             continue
