@@ -565,8 +565,20 @@
 
 ## NOW
 
-**Working on:** Context hygiene — dead code removed, CLAUDE.md extracted to 258 lines
-**Last commit:** cb5576b — refactor: remove dead _pick_backend_name() + its tests
+### 2026-05-15 — Session 59 (a2cb2c7)
+**Working on:** Dead code cleanup + context hygiene
+**Last commit:** a2cb2c7 — docs: context hygiene — extract File Conventions, CLAUDE.md 290→258 lines
+**Next action:** user-directed; PLAN_future Phase 3 (news scraper) or PLAN_platform (pgvector RAG)
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
+**Tests:** pass — 189/189
+
+---
+
+## NOW
+
+**Working on:** Dead code cleanup + context hygiene
+**Last commit:** a2cb2c7 — docs: context hygiene — extract File Conventions, CLAUDE.md 290→258 lines
 **Next action:** user-directed; PLAN_future Phase 3 (news scraper) or PLAN_platform (pgvector RAG)
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.

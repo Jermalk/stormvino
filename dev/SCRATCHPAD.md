@@ -4,4 +4,4 @@
 > Format: bullet points, max 5 lines per topic, no prose.
 
 ## Carried over:
-Session 58: Routing battle test. 49 tests in autotest/test_routing.py — 6 groups: signal detection (11), model selection (9), scope/cloud (4), complexity scoring (5), dead code/edge cases (6), live integration (11). Found and fixed 1 real bug: NoModelAvailable from ig_router.decide() was unhandled in chat_handler.py when #cloud sent with no OVH backend → 500. Fixed: try/except → reselect('general', local). Also confirmed: _pick_backend_name() is dead code (AST test); OVH config ordering invariant holds; force_tier overrides complexity promotion. 193/193 tests pass (38 routing pure + 4 skip + 11 live).
+Session 59: Two-commit cleanup. (1) Deleted dead `_pick_backend_name()` from chat_handler.py, removed its import and `TestPickBackendName` class (4 tests) from test_pure.py, flipped the autotest tombstone to assert the function is gone — 189/189 pass. (2) CLAUDE.md was at 290 lines (soft threshold); extracted File Conventions table (37 lines) to dev/CLAUDE-ref-2.md and replaced with a one-liner — now 258 lines, 62 below the 320 hard cap. No architectural decisions.
