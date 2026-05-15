@@ -25,9 +25,10 @@ from pathlib import Path
 
 import httpx
 
-_CONFIG_PATH = Path("/opt/ov_server/config.json")
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_CONFIG_PATH = _REPO_ROOT / "config.json"
 _image_model = json.loads(_CONFIG_PATH.read_text()).get("image_model", "sdxl-fp16-ov")
-MODEL_DIR = Path(f"/opt/ov_server/models/{_image_model}")
+MODEL_DIR = _REPO_ROOT / "models" / _image_model
 DEVICE = "GPU.1"
 BASE = "http://localhost:11435"
 TIMEOUT = 300.0

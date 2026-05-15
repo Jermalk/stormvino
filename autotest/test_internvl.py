@@ -25,7 +25,7 @@ from pathlib import Path
 
 import httpx
 
-MODEL_DIR = Path("/opt/ov_server/models/internvl2.5-8b-int4-ov")
+MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "internvl2.5-8b-int4-ov"
 DEVICE = "GPU.1"
 BASE = "http://localhost:11435"
 TIMEOUT = 300.0
@@ -273,7 +273,7 @@ def test_adapter_detection() -> bool:
     print("\n[7] Adapter detection for InternVL tokenizer")
     try:
         import sys
-        sys.path.insert(0, "/opt/ov_server")
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         from transformers import AutoTokenizer
         from prompt_builder import get_adapter, InternVLAdapter
 

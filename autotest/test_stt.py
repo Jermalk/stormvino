@@ -26,7 +26,7 @@ from pathlib import Path
 
 import httpx
 
-MODEL_DIR = Path("/opt/ov_server/models/whisper-large-v3-int8-ov")
+MODEL_DIR = Path(__file__).resolve().parent.parent / "models" / "whisper-large-v3-int8-ov"
 DEVICE = "GPU.1"
 BASE = "http://localhost:11435"
 TIMEOUT = 180.0

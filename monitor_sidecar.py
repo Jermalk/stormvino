@@ -1,4 +1,4 @@
-#!/home/jerzy/ov_env/bin/python3
+#!/usr/bin/env python3
 """
 monitor_sidecar.py — GPU metrics + server health proxy for SVP monitor.
 Runs independently of ov_server; survives server restarts/model loads.
