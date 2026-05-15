@@ -393,6 +393,10 @@ async def _proxy_chat(req: ChatRequest, spec: dict) -> StreamingResponse | JSONR
     api_key = os.environ.get(spec.get("api_key_env", ""), "")
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     body = req.model_dump(exclude_none=True)
+    # Strip ov_server-specific fields that are not part of the OpenAI API spec
+    # and will be rejected as "extra arguments" by OVH and other strict providers.
+    for _f in ("thinking", "repetition_penalty"):
+        body.pop(_f, None)
     if "model" in spec:
         body["model"] = spec["model"]
 
