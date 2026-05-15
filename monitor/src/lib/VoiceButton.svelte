@@ -159,6 +159,7 @@
 <div class="voice-root">
   {#if lastText || lastReply}
     <div class="bubble">
+      <button class="close" onclick={() => { lastText = ''; lastReply = '' }} title="Dismiss">✕</button>
       {#if lastText}
         <p class="q"><span class="label">You</span> {lastText}</p>
       {/if}
@@ -197,10 +198,12 @@
   }
 
   .bubble {
+    position: relative;
     background: #1e2230;
     border: 1px solid #ffffff12;
     border-radius: .75rem;
     padding: .6rem .8rem;
+    padding-top: 1.4rem;
     max-width: 22rem;
     font-size: .75rem;
     line-height: 1.45;
@@ -209,6 +212,20 @@
     gap: .35rem;
     box-shadow: 0 4px 24px #0006;
   }
+  .close {
+    position: absolute;
+    top: .3rem;
+    right: .4rem;
+    background: none;
+    border: none;
+    color: #ffffff44;
+    font-size: .75rem;
+    cursor: pointer;
+    line-height: 1;
+    padding: .1rem .25rem;
+    border-radius: .25rem;
+  }
+  .close:hover { color: #ffffff99; background: #ffffff0e; }
   .q, .a { margin: 0; color: #c8ccd8; }
   .label {
     font-weight: 700;
