@@ -139,10 +139,13 @@ from infergate.router import Router as _IGRouter
 from chat_handler import chat_router
 from admin_routes import admin_router
 from media_routes import media_router
+from news_routes import news_router
+import news_scraper
 
 app.include_router(chat_router)
 app.include_router(admin_router)
 app.include_router(media_router)
+app.include_router(news_router)
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +223,7 @@ async def _startup_preload() -> None:
         log.info("Startup warmup complete")
 
     asyncio.create_task(_startup_warmup())
+    asyncio.create_task(news_scraper.background_loop(_cfg))
     asyncio.create_task(
         model_manager.run_background_profiler(
             list(AVAILABLE_MODELS),
