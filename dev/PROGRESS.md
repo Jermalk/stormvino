@@ -543,10 +543,20 @@
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
 **Tests:** pass — 159/159; English (af_kore kokoro) + Polish (gosia piper) both verified live
 
+### 2026-05-15 — Session 57 (aafa7d6)
+**Working on:** Diagnostics session — VRAM profiler, observability DB, system prompt compliance
+**Last commit:** aafa7d6 — feat: server-side system prefix — date injection + clean /no_think
+**Next action:** user-directed; PLAN_future Phase 3 (news scraper) or PLAN_platform (pgvector RAG)
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
+**Tests:** pass — 159/159
+
+---
+
 ## NOW
 
-**Working on:** TTS upgrade complete — kokoro-onnx English + piper Polish, multi-engine pipeline
-**Last commit:** 5f2ccf7 — feat: Polish TTS via piper Gosia + multi-engine TTS pipeline
+**Working on:** Server-side system prefix — date injection + OpenAI-compliant /no_think handling
+**Last commit:** aafa7d6 — feat: server-side system prefix — date injection + clean /no_think
 **Next action:** user-directed; PLAN_future Phase 3 (news scraper) or PLAN_platform (pgvector RAG)
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.

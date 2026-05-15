@@ -499,3 +499,15 @@
 **Rationale:** The kokoro PyTorch package pulls in spacy, which imports our local catalogue.py instead of the spacy catalogue package (shadowing by cwd). kokoro-onnx has minimal deps (onnxruntime, phonemizer) and avoids the collision entirely.
 **Rejected alternative:** Manipulate sys.path to fix shadowing — fragile; kokoro-onnx is the cleaner solution.
 **Affects:** tts_pipeline.py
+
+### 2026-05-15 — Server-side system prefix architecture
+**Decision:** Inject server-controlled content (date, /no_think) as a prefix prepended to the system message rather than mutating the client's text.
+**Rationale:** Mutating the client's system message is an OpenAI API compliance violation — the client sends one thing and the model receives something different. Prefixing keeps the client's text verbatim while giving the server a clean injection point.
+**Rejected alternative:** Inject as a second system message — model-family support varies; merging at the prefix level is simpler and universally safe.
+**Affects:** prompt_builder.py (_build_msg_dicts, build_vlm_prompt, MistralAdapter.build_prompt)
+
+### 2026-05-15 — /no_think is Qwen3-specific, not universal
+**Decision:** /no_think is injected only on the Qwen/default path (_build_msg_dicts), not in MistralAdapter or build_vlm_prompt.
+**Rationale:** /no_think is a Qwen3 model directive that has no meaning for Mistral or VLM models. Injecting it there is noise that could confuse non-Qwen models.
+**Rejected alternative:** Universal injection — would litter Mistral and VLM prompts with a meaningless token.
+**Affects:** prompt_builder.py
