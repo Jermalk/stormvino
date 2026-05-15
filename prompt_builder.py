@@ -7,7 +7,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import date as _date
+from datetime import datetime as _datetime
 from typing import Any, Protocol
 
 from pydantic import BaseModel
@@ -17,7 +17,13 @@ log = logging.getLogger("ov_server")
 
 
 def _date_prefix() -> str:
-    return f"Today is {_date.today():%Y-%m-%d}."
+    now = _datetime.now().astimezone()
+    tz_off = now.strftime("%z")                        # e.g. "+0200"
+    utc_label = f"UTC{tz_off[:3]}:{tz_off[3:]}"       # e.g. "UTC+02:00"
+    return (
+        f"Today is {now:%Y-%m-%d}. "
+        f"Current local time: {now:%H:%M} {now.strftime('%Z')} ({utc_label})."
+    )
 
 
 def _server_system_prefix(thinking: bool) -> str:
