@@ -1,5 +1,4 @@
 <script>
-  import { onMount } from 'svelte'
   import { switchProfile, switchScope, fetchAvailableModels, loadModel } from './api.js'
 
   let { health, onActionStart } = $props()
@@ -34,15 +33,25 @@
   const localModels  = $derived(allModels.filter(m => m.provider === 'loc'))
   const remoteModels = $derived(allModels.filter(m => m.provider !== 'loc'))
 
+  function fmtPln(v) { return v != null ? v.toFixed(2) : '—' }
+
   function modelLabel(m) {
     const name = m.id.replace(/-int4-ov|-int8-ov|-fp16-ov|-int4|-int8/g, '')
+    if (m.provider !== 'loc') {
+      const prov = (m.provider ?? 'remote').toUpperCase()
+      const p    = m.pricing
+      const price = p ? `  IN:${fmtPln(p.input_pln)} | OUT:${fmtPln(p.output_pln)} PLN` : ''
+      const type  = m.model_type === 'vlm' ? ' · VLM' : ''
+      return `${name} · ${prov}${type}${price}`
+    }
     const type = m.model_type === 'vlm' ? 'VLM' : 'LLM'
     return `${name} · ${type}`
   }
 
-  onMount(async () => {
-    try { allModels = await fetchAvailableModels() }
-    catch { /* server not ready yet */ }
+  // Re-fetch model list on mount and whenever scope changes (scope switch adds/removes OVH models).
+  $effect(() => {
+    const _s = scope  // reactive dependency — re-run when scope changes
+    fetchAvailableModels().then(m => { allModels = m }).catch(() => {})
   })
 
   async function setProfile(name) {

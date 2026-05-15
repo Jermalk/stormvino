@@ -29,6 +29,29 @@ _catalogue_cache: dict[str, tuple[list[dict], float]] = {}
 
 _TIER_RANK: dict[str, int] = {"fast": 1, "balanced": 2, "best": 3}
 
+_VLM_KEYWORDS: tuple[str, ...] = ("vl-", "vl_", "-vl", "vision", "vlm", "multimodal", "pixtral", "internvl")
+
+
+def _detect_model_type(mid: str) -> str:
+    lower = mid.lower()
+    return "vlm" if any(k in lower for k in _VLM_KEYWORDS) else "llm"
+
+
+def _extract_ovh_pricing(raw: dict) -> dict | None:
+    """Extract per-1M-token pricing from an OVH model entry and convert to PLN."""
+    p = raw.get("pricing")
+    if not isinstance(p, dict):
+        return None
+    inp_eur = p.get("input") or p.get("prompt")
+    out_eur = p.get("output") or p.get("completion")
+    if inp_eur is None and out_eur is None:
+        return None
+    rate = float(_cfg.get("eur_to_pln", 4.28))
+    return {
+        "input_pln":  round(float(inp_eur or 0) * rate, 2),
+        "output_pln": round(float(out_eur or 0) * rate, 2),
+    }
+
 
 def _tier_map_for_provider(provider: str) -> dict[str, str]:
     """Return {model_id: tier} for the given provider, derived from task_classes.
@@ -100,11 +123,11 @@ async def _fetch_ovh_catalogue(spec: dict) -> list[dict]:
             entries.append({
                 "id":             mid,
                 "object":         "model",
-                "model_type":     "llm",
+                "model_type":     _detect_model_type(mid),
                 "provider":       "ovh",
                 "tier":           ovh_tier.get(mid, "best"),
                 "context_length": m.get("context_length") or m.get("context_window"),
-                "pricing":        None,
+                "pricing":        _extract_ovh_pricing(m),
                 "loaded":         False,
             })
 
