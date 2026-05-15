@@ -38,18 +38,25 @@ def _detect_model_type(mid: str) -> str:
 
 
 def _extract_ovh_pricing(raw: dict) -> dict | None:
-    """Extract per-1M-token pricing from an OVH model entry and convert to PLN."""
+    """Extract per-token USD pricing from OVH response, convert to per-1M-token PLN.
+
+    OVH returns string values per token under "prompt"/"completion" keys, e.g.
+    {"prompt": "0.00000005", "completion": "0.00000018", "currency_unit": "USD"}.
+    """
     p = raw.get("pricing")
     if not isinstance(p, dict):
         return None
-    inp_eur = p.get("input") or p.get("prompt")
-    out_eur = p.get("output") or p.get("completion")
-    if inp_eur is None and out_eur is None:
+    try:
+        inp_usd = float(p.get("prompt") or 0)
+        out_usd = float(p.get("completion") or 0)
+    except (TypeError, ValueError):
         return None
-    rate = float(_cfg.get("eur_to_pln", 4.28))
+    if inp_usd == 0 and out_usd == 0:
+        return None
+    rate = float(_cfg.get("usd_to_pln", 3.82))
     return {
-        "input_pln":  round(float(inp_eur or 0) * rate, 2),
-        "output_pln": round(float(out_eur or 0) * rate, 2),
+        "input_pln":  round(inp_usd * 1_000_000 * rate, 2),
+        "output_pln": round(out_usd * 1_000_000 * rate, 2),
     }
 
 

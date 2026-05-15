@@ -355,10 +355,21 @@ async def manual_load_model(req: LoadModelRequest) -> JSONResponse:
     if req.model_id == "auto":
         asyncio.create_task(_apply_profile(app_state.active_profile))
         return JSONResponse(status_code=200, content={"status": "ok", "action": "applying_profile"})
-    if req.model_id not in AVAILABLE_MODELS and req.model_id not in AVAILABLE_VLM_MODELS:
-        raise HTTPException(status_code=404, detail=f"Unknown local model '{req.model_id}'")
-    asyncio.create_task(_do_manual_load(req.model_id))
-    return JSONResponse(status_code=200, content={"status": "ok", "model_id": req.model_id})
+
+    # Local LLM or VLM — warm into VRAM
+    if req.model_id in AVAILABLE_MODELS or req.model_id in AVAILABLE_VLM_MODELS:
+        asyncio.create_task(_do_manual_load(req.model_id))
+        return JSONResponse(status_code=200, content={"status": "ok", "model_id": req.model_id})
+
+    # OVH model — configure routing to target this model; AUTO resets it
+    if "ovh" in _cfg.get("providers", {}):
+        _cfg.setdefault("routing", {}).setdefault("backends", {}).setdefault("ovh", {})["model"] = req.model_id
+        _cfg["routing"]["default"] = "ovh"
+        _cfg["provider_scope"] = "local+ovh"
+        log.info(f"Routing override → OVH '{req.model_id}'")
+        return JSONResponse(status_code=200, content={"status": "ok", "action": "ovh_routing", "model_id": req.model_id})
+
+    raise HTTPException(status_code=404, detail=f"Unknown model '{req.model_id}'")
 
 
 @admin_router.post("/maintenance/restart")

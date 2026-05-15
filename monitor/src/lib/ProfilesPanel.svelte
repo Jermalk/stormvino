@@ -72,8 +72,6 @@
 
   async function handleModelSelect() {
     if (busy || restarting) return
-    const model = allModels.find(m => m.id === selectedModel)
-    if (model && model.provider !== 'loc') return  // remote models can't be loaded locally
     onActionStart()
     busy = true
     await loadModel(selectedModel).catch(() => {})
@@ -156,9 +154,7 @@
       {#if remoteModels.length}
         <optgroup label="Remote">
           {#each remoteModels as m}
-            <option value={m.id} disabled>
-              {m.id.replace(/-int4-ov|-int8-ov|-fp16-ov/g, '')} · {m.provider?.toUpperCase()}
-            </option>
+            <option value={m.id}>{modelLabel(m)}</option>
           {/each}
         </optgroup>
       {/if}
