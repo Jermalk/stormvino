@@ -521,11 +521,22 @@
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
 **Tests:** pass — 159/159
 
+---
+
+### 2026-05-15 — Session 55 (8d5f298)
+
+**Working on:** TTS Phase 1 — POST /v1/audio/speech via piper-tts
+**Last commit:** 8d5f298 — feat: TTS endpoint — POST /v1/audio/speech via piper-tts
+**Next action:** user-directed; PLAN_future Phase 3 (news scraper) or PLAN_platform (pgvector RAG) next
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
+**Tests:** pass — 159/159; TTS endpoint verified live (WAV 112KB, 0.8s first load, 116ms synthesis)
+
 ## NOW
 
-**Working on:** VRAM profiler plan audit — all 8 steps confirmed complete
-**Last commit:** e18deef — docs: session wrap — repo cleanup, security sweep, infergate gaps all fixed
-**Next action:** user-directed; remaining active plans: PLAN_future (TTS/news/voice), PLAN_platform (pgvector RAG)
+**Working on:** TTS Phase 1 complete — POST /v1/audio/speech via piper-tts
+**Last commit:** 8d5f298 — feat: TTS endpoint — POST /v1/audio/speech via piper-tts
+**Next action:** user-directed; PLAN_future Phase 3 (news scraper) or PLAN_platform (pgvector RAG)
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
 **Tests:** pass — 159/159
