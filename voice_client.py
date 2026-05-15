@@ -6,10 +6,12 @@ Loop:
   record (VAD) → transcribe (Whisper) → chat (LLM) → synthesize (TTS) → play → repeat
 
 Usage:
-  python3 voice_client.py
-  python3 voice_client.py --briefing          # fetch + read news on startup
+  python3 voice_client.py                       # auto-detect best mic
+  python3 voice_client.py --list-devices        # show available mics
+  python3 voice_client.py --device 10           # use device index 10
+  python3 voice_client.py --briefing            # read news digest on startup
   python3 voice_client.py --model qwen3-14b-int4-ov
-  python3 voice_client.py --lang pl           # Polish voice + system prompt hint
+  python3 voice_client.py --lang pl             # Polish voice + system prompt
 
 Config (optional): ~/.voice_agent.json
   {
@@ -17,6 +19,7 @@ Config (optional): ~/.voice_agent.json
     "model": "Auto",
     "tts_voice": "af_kore",
     "tts_lang": "en",
+    "input_device": null,
     "history_turns": 6,
     "silence_threshold": 0.02,
     "silence_duration": 1.5,
@@ -45,11 +48,15 @@ DEFAULTS = {
     "model":             "Auto",
     "tts_voice":         "af_kore",
     "tts_lang":          "en",
+    "input_device":      None,   # None = auto-detect; int = device index
     "history_turns":     6,
     "silence_threshold": 0.02,
     "silence_duration":  1.5,
     "max_record_sec":    30,
 }
+
+# USB mic keywords — first match wins over the system default
+_USB_MIC_KEYWORDS = ("c922", "c920", "c930", "logitech", "usb audio", "webcam")
 
 def load_config(overrides: dict) -> dict:
     cfg = dict(DEFAULTS)
@@ -59,6 +66,46 @@ def load_config(overrides: dict) -> dict:
             cfg.update(json.load(fh))
     cfg.update({k: v for k, v in overrides.items() if v is not None})
     return cfg
+
+
+def list_input_devices() -> None:
+    """Print all input-capable devices and exit."""
+    print("Available input devices:")
+    for i, d in enumerate(sd.query_devices()):
+        if d["max_input_channels"] > 0:
+            marker = " *" if i == sd.default.device[0] else "  "
+            print(f"{marker}[{i:2d}] {d['name']}  "
+                  f"({d['max_input_channels']}ch, {d['default_samplerate']:.0f} Hz)")
+    sys.exit(0)
+
+
+def _auto_detect_device() -> int | None:
+    """Return index of first USB/webcam mic found, or None to use system default."""
+    for i, d in enumerate(sd.query_devices()):
+        if d["max_input_channels"] > 0:
+            name_lower = d["name"].lower()
+            if any(kw in name_lower for kw in _USB_MIC_KEYWORDS):
+                return i
+    return None
+
+
+def resolve_input_device(cfg: dict) -> tuple[int | None, int]:
+    """Return (device_index, sample_rate) to use for recording.
+
+    Records at the device's native sample rate — Whisper accepts any rate.
+    """
+    device = cfg.get("input_device")
+    if device is None:
+        device = _auto_detect_device()
+
+    if device is not None:
+        dev_info = sd.query_devices(device)
+        sr = int(dev_info["default_samplerate"])
+    else:
+        dev_info = sd.query_devices(kind="input")
+        sr = int(dev_info["default_samplerate"])
+
+    return device, sr
 
 # ---------------------------------------------------------------------------
 # Terminal helpers
@@ -76,30 +123,40 @@ def warn(msg: str)  -> None: print(_c("31", f"  ⚠ {msg}"), file=sys.stderr)
 # Recording with energy-based VAD
 # ---------------------------------------------------------------------------
 
-SAMPLE_RATE = 16_000   # Whisper expects 16 kHz
-CHANNELS    = 1
-CHUNK_SEC   = 0.05     # 50 ms chunks
+CHANNELS  = 1
+CHUNK_SEC = 0.05  # 50 ms chunks
 
-def record_until_silence(cfg: dict) -> np.ndarray | None:
-    """Record mic until silence_duration seconds of silence after speech starts.
 
-    Returns float32 mono array at SAMPLE_RATE, or None if nothing was said.
+def record_until_silence(
+    cfg: dict,
+    device: int | None,
+    sample_rate: int,
+) -> np.ndarray | None:
+    """Record from `device` at `sample_rate` until silence_duration of quiet after speech.
+
+    Returns float32 mono array (at device native sample_rate), or None if silent.
+    Whisper accepts any sample rate in the WAV file.
     """
-    thresh          = cfg["silence_threshold"]
-    silence_dur     = cfg["silence_duration"]
-    max_dur         = cfg["max_record_sec"]
-    chunk_samples   = int(SAMPLE_RATE * CHUNK_SEC)
-    silence_needed  = int(silence_dur / CHUNK_SEC)
-    max_chunks      = int(max_dur / CHUNK_SEC)
+    thresh         = cfg["silence_threshold"]
+    silence_dur    = cfg["silence_duration"]
+    max_dur        = cfg["max_record_sec"]
+    chunk_samples  = int(sample_rate * CHUNK_SEC)
+    silence_needed = int(silence_dur / CHUNK_SEC)
+    max_chunks     = int(max_dur / CHUNK_SEC)
 
     frames:        list[np.ndarray] = []
-    silence_count: int = 0
+    silence_count: int  = 0
     speaking:      bool = False
 
     print(_c("36", "\n[Listening…]"), end="", flush=True)
 
     try:
-        with sd.InputStream(samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="float32") as stream:
+        with sd.InputStream(
+            device=device,
+            samplerate=sample_rate,
+            channels=CHANNELS,
+            dtype="float32",
+        ) as stream:
             for _ in range(max_chunks):
                 chunk, _ = stream.read(chunk_samples)
                 rms = float(np.sqrt(np.mean(chunk ** 2)))
@@ -128,9 +185,9 @@ def record_until_silence(cfg: dict) -> np.ndarray | None:
 # STT — POST /v1/audio/transcriptions
 # ---------------------------------------------------------------------------
 
-def transcribe(audio: np.ndarray, server: str) -> str:
+def transcribe(audio: np.ndarray, sample_rate: int, server: str) -> str:
     buf = io.BytesIO()
-    sf.write(buf, audio, SAMPLE_RATE, format="WAV", subtype="PCM_16")
+    sf.write(buf, audio, sample_rate, format="WAV", subtype="PCM_16")
     buf.seek(0)
     try:
         r = httpx.post(
@@ -270,14 +327,20 @@ def build_history(history: list[dict], max_turns: int) -> list[dict]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Voice conversation agent")
-    parser.add_argument("--briefing", action="store_true", help="Read news on startup")
-    parser.add_argument("--model",    default=None, help="Override model")
-    parser.add_argument("--lang",     default=None, help="Language hint: en | pl")
+    parser.add_argument("--briefing",     action="store_true", help="Read news digest on startup")
+    parser.add_argument("--model",        default=None,        help="Override model")
+    parser.add_argument("--lang",         default=None,        help="Language: en | pl")
+    parser.add_argument("--device",       default=None, type=int, help="Input device index (see --list-devices)")
+    parser.add_argument("--list-devices", action="store_true", help="List available microphones and exit")
     args = parser.parse_args()
 
-    overrides = {
-        "model":    args.model,
-        "tts_lang": args.lang,
+    if args.list_devices:
+        list_input_devices()
+
+    overrides: dict = {
+        "model":        args.model,
+        "tts_lang":     args.lang,
+        "input_device": args.device,
     }
     if args.lang == "pl":
         overrides["tts_voice"] = "pl_PL-gosia-medium"
@@ -289,10 +352,15 @@ def main() -> None:
 
     conversation: list[dict] = []   # user/assistant turns only (no system)
 
+    input_device, sample_rate = resolve_input_device(cfg)
+    dev_name = sd.query_devices(input_device)["name"] if input_device is not None \
+               else sd.query_devices(kind="input")["name"]
+
     print(_c("36;1", "\n=== Voice Agent ==="))
     info(f"Server : {cfg['server']}")
     info(f"Model  : {cfg['model']}")
     info(f"Voice  : {cfg['tts_voice']} ({cfg['tts_lang']})")
+    info(f"Mic    : [{input_device}] {dev_name} @ {sample_rate} Hz")
     info("Ctrl+C to quit\n")
 
     # Verify server
@@ -307,17 +375,17 @@ def main() -> None:
 
     while True:
         try:
-            audio = record_until_silence(cfg)
+            audio = record_until_silence(cfg, input_device, sample_rate)
         except KeyboardInterrupt:
             print("\nBye.")
             break
 
-        if audio is None or len(audio) < SAMPLE_RATE * 0.3:
+        if audio is None or len(audio) < sample_rate * 0.3:
             info("(no speech detected)")
             continue
 
         info("Transcribing…")
-        text = transcribe(audio, cfg["server"])
+        text = transcribe(audio, sample_rate, cfg["server"])
         if not text:
             info("(could not transcribe)")
             continue
