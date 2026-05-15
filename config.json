@@ -48,7 +48,7 @@
     "stt_device":      "GPU.1",
 
     "tts_model_dir":   "piper",
-    "tts_voice":       "en_US-lessac-medium",
+    "tts_voice":       "en_US-amy-medium",
 
     "model_kv_overrides": {},
 
