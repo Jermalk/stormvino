@@ -493,11 +493,21 @@
 
 ---
 
+### 2026-05-15 — Session 52 (d196ac7)
+**Working on:** VramBar loading animation reliability, optimistic UI, manual model selector, OVH proxy fix
+**Last commit:** d196ac7 — fix: strip non-standard fields before proxying to OVH
+**Next action:** user-directed; no outstanding plan items
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
+**Tests:** pass — 159/159; OVH proxy verified with gpt-oss-120b + Qwen3-32B
+
+---
+
 ## NOW
 
-**Working on:** session wrap + GitHub push
-**Last commit:** c9e3711 — docs: README — Origin section linking Stormvino back to Shangri-Lab
-**Next action:** write round_07 feedback or start next feature; no outstanding plan items
+**Working on:** session wrap
+**Last commit:** d196ac7 — fix: strip non-standard fields before proxying to OVH
+**Next action:** user-directed; no outstanding plan items
 **Blocked on:** nothing
-**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning.
-**Tests:** pass — 159/159
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
+**Tests:** pass — 159/159; OVH proxy verified with gpt-oss-120b + Qwen3-32B
