@@ -503,11 +503,20 @@
 
 ---
 
-## NOW
+### 2026-05-15 — Session 53 (9af8b27)
 
-**Working on:** session wrap
-**Last commit:** d196ac7 — fix: strip non-standard fields before proxying to OVH
+**Working on:** Repo cleanup — plans audit, dev/ restructure, public repo hygiene, infergate gaps verification
+**Last commit:** 9af8b27 — fix: remove personal paths and credentials from public files
 **Next action:** user-directed; no outstanding plan items
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
-**Tests:** pass — 159/159; OVH proxy verified with gpt-oss-120b + Qwen3-32B
+**Tests:** pass — 159/159
+
+## NOW
+
+**Working on:** repo cleanup + infergate P0 gap verification
+**Last commit:** 9af8b27 — fix: remove personal paths and credentials from public files
+**Next action:** user-directed; remaining active plans: VRAM profiler Steps 5-8, PLAN_future TTS, PLAN_platform pgvector RAG
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
+**Tests:** pass — 159/159
