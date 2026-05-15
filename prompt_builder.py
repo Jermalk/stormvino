@@ -7,12 +7,29 @@ import json
 import logging
 import re
 import uuid
+from datetime import date as _date
 from typing import Any, Protocol
 
 from pydantic import BaseModel
 from transformers import AutoTokenizer
 
 log = logging.getLogger("ov_server")
+
+
+def _date_prefix() -> str:
+    return f"Today is {_date.today():%Y-%m-%d}."
+
+
+def _server_system_prefix(thinking: bool) -> str:
+    """Server-controlled prefix prepended to every system message.
+
+    Keeps server concerns (date, thinking directive) out of the client's text.
+    /no_think is Qwen3-specific; only injected on the Qwen/default path.
+    """
+    parts = [_date_prefix()]
+    if not thinking:
+        parts.append("/no_think")
+    return " ".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -87,12 +104,17 @@ def build_vlm_prompt(messages: list[Message], tokenizer: AutoTokenizer) -> str:
     template_is_simple = ("message['content']" in chat_tmpl
                           or 'message["content"]' in chat_tmpl
                           or not chat_tmpl)
+    prefix = _date_prefix()
     msg_dicts: list[dict[str, Any]] = []
     has_system = any(m.role == "system" for m in messages)
     if not has_system:
-        msg_dicts.append({"role": "system", "content": "You are a helpful assistant."})
+        msg_dicts.append({"role": "system", "content": f"{prefix}\nYou are a helpful assistant."})
     for m in messages:
-        msg_dicts.append({"role": m.role, "content": _vlm_content(m, template_is_simple)})
+        content = _vlm_content(m, template_is_simple)
+        if m.role == "system":
+            client_text = content if isinstance(content, str) else _text_content(m)
+            content = f"{prefix}\n{client_text}"
+        msg_dicts.append({"role": m.role, "content": content})
     return tokenizer.apply_chat_template(
         msg_dicts, tokenize=False, add_generation_prompt=True
     )
@@ -105,16 +127,16 @@ def _build_msg_dicts(
     messages: list[Message],
     thinking: bool,
 ) -> list[dict[str, Any]]:
-    suffix = " /no_think" if not thinking else ""
+    prefix = _server_system_prefix(thinking)
     msg_dicts: list[dict[str, Any]] = []
     has_system = any(m.role == "system" for m in messages)
     if not has_system:
-        msg_dicts.append({"role": "system", "content": f"You are a helpful assistant.{suffix}"})
+        msg_dicts.append({"role": "system", "content": f"{prefix}\nYou are a helpful assistant."})
     for m in messages:
         text = _text_content(m)
         d: dict[str, Any] = {"role": m.role, "content": text}
-        if m.role == "system" and not thinking and not text.endswith("/no_think"):
-            d["content"] = text.rstrip() + suffix
+        if m.role == "system":
+            d["content"] = f"{prefix}\n{text}"
         if m.tool_call_id:
             d["tool_call_id"] = m.tool_call_id
         if m.tool_calls:
@@ -258,12 +280,13 @@ class MistralAdapter:
         bos = tokenizer.bos_token or "<s>"
         eos = tokenizer.eos_token or "</s>"
 
-        sys_text = "You are a helpful assistant."
+        client_sys = "You are a helpful assistant."
         loop_messages = messages
         if messages and messages[0].role == "system":
-            sys_text = _text_content(messages[0])
+            client_sys = _text_content(messages[0])
             loop_messages = messages[1:]
 
+        sys_text = f"{_date_prefix()}\n{client_sys}"
         tools_block = (
             f"[AVAILABLE_TOOLS]{json.dumps(tools, ensure_ascii=False)}[/AVAILABLE_TOOLS]"
         )

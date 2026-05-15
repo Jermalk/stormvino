@@ -21,7 +21,7 @@
     "enable_prefix_caching":  true,
     "max_num_batched_tokens":  4096,
 
-    "postgres_dsn":   "postgresql://ov_server:CHANGE_ME@localhost/ov_metrics",
+    "postgres_dsn":   "postgresql://ov_server:ov_server@localhost/ov_metrics",
 
     "provider_scope": "local",
     "usd_to_pln": 3.82,
