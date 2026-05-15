@@ -209,12 +209,17 @@ async def _startup_preload() -> None:
     asyncio.create_task(model_manager._load_assessor())
     asyncio.create_task(_system_snapshot_loop())
     gpu_monitor.start()
-    if get_agent_model():
-        log.info(f"Scheduling startup preload of agent model '{get_agent_model()}'")
-        asyncio.create_task(model_manager._warm_model(get_agent_model()))
-    if VISION_MODEL:
-        log.info(f"Scheduling startup preload of VLM '{VISION_MODEL}'")
-        asyncio.create_task(model_manager._warm_vlm(VISION_MODEL))
+    async def _startup_warmup() -> None:
+        if get_agent_model():
+            log.info(f"Startup: preloading '{get_agent_model()}'")
+            await model_manager._warm_model(get_agent_model())
+        if VISION_MODEL:
+            log.info(f"Startup: preloading VLM '{VISION_MODEL}'")
+            await model_manager._warm_vlm(VISION_MODEL)
+        app_state.startup_loading = False
+        log.info("Startup warmup complete")
+
+    asyncio.create_task(_startup_warmup())
     asyncio.create_task(
         model_manager.run_background_profiler(
             list(AVAILABLE_MODELS),

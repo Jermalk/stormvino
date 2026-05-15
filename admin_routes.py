@@ -222,6 +222,7 @@ async def health():
         "active_profile": app_state.active_profile,
         "profiles_config": _cfg.get("profiles", {}),
         "profile_switching": app_state.profile_switching,
+        "startup_loading": app_state.startup_loading,
         "loading_model_id": model_manager._loading_model_id,
         "routing_backend": _cfg.get("routing", {}).get("default", "local"),
         "provider_scope": _cfg.get("provider_scope", "local"),

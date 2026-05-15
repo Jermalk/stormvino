@@ -38,9 +38,15 @@
   // Grows in real-time as a model loads. OV runtime overhead is ~0.9 GB,
   // so threshold at 1.2 GB to avoid false animation at idle.
   const loadingGb  = $derived(Math.max(0, liveServerGb - allocatedSum))
-  const loadingPct = $derived(loadingGb / totalGb * 100)
-  const showLoading = $derived(
-    loadingGb > 1.2 || !!(health?.loading_model_id) || !!(health?.profile_switching)
+
+  // Canonical loading flag — explicit server signals take priority.
+  // loadingGb > 1.2 is the belt-and-suspenders fallback for the brief gap
+  // before the server sets loading_model_id (e.g. task scheduled but not yet run).
+  const isLoading = $derived(
+    !!(health?.loading_model_id) ||
+    !!(health?.profile_switching) ||
+    !!(health?.startup_loading) ||
+    loadingGb > 1.2
   )
 
   const usedGb = $derived(liveServerGb || allocatedSum)
@@ -61,41 +67,42 @@
   </div>
 
   <div class="bar-track">
-    {#each segments as s}
-      <div class="seg weights" style="width:{s.wPct}%; background:{s.color}" title="{s.id} weights {s.weightsGb.toFixed(1)}GB"></div>
-      {#if s.kPct > 0}
-        <div class="seg kv" style="width:{s.kPct}%; background:{s.color}66" title="{s.id} KV {s.kvSegGb.toFixed(1)}GB"></div>
-      {/if}
-    {/each}
-    {#if showLoading}
-      <div class="seg loading-seg" style="width:{loadingPct}%; min-width:{loadingGb > 0.5 ? loadingPct : 2}%" title="Loading {loadingGb.toFixed(1)}GB">
+    {#if isLoading}
+      <div class="seg loading-seg" style="width:100%">
         <div class="load-shimmer"></div>
       </div>
-      <div class="seg free" style="flex:1" title="free {freeGb.toFixed(1)}GB"></div>
     {:else}
+      {#each segments as s}
+        <div class="seg weights" style="width:{s.wPct}%; background:{s.color}" title="{s.id} weights {s.weightsGb.toFixed(1)}GB"></div>
+        {#if s.kPct > 0}
+          <div class="seg kv" style="width:{s.kPct}%; background:{s.color}66" title="{s.id} KV {s.kvSegGb.toFixed(1)}GB"></div>
+        {/if}
+      {/each}
       <div class="seg free" style="flex:1" title="free {freeGb.toFixed(1)}GB"></div>
     {/if}
   </div>
 
   <div class="legend">
-    {#each segments as s}
-      <span class="leg-item">
-        <span class="dot" style="background:{s.color}"></span>
-        <span class="leg-label">{s.id.replace(/-int4-ov|-int8-ov|-fp16-ov/g, '')}</span>
-        <span class="leg-detail">
-          {s.isVlm ? `${s.weightsGb.toFixed(1)}GB` : `${s.weightsGb.toFixed(1)}+${s.kvSegGb.toFixed(1)}GB`}
-        </span>
-      </span>
-    {/each}
-    {#if showLoading}
+    {#if isLoading}
       <span class="leg-item loading-item">
         <span class="dot loading-dot"></span>
-        <span class="leg-label">{loadingLabel ? `Loading ${loadingLabel}…` : 'Switching…'}</span>
+        <span class="leg-label">
+          {loadingLabel ? `Loading ${loadingLabel}…` : (health?.profile_switching ? 'Switching profile…' : 'Initializing…')}
+        </span>
         {#if loadingGb > 0.5}
           <span class="leg-detail">{loadingGb.toFixed(1)}GB</span>
         {/if}
       </span>
     {:else}
+      {#each segments as s}
+        <span class="leg-item">
+          <span class="dot" style="background:{s.color}"></span>
+          <span class="leg-label">{s.id.replace(/-int4-ov|-int8-ov|-fp16-ov/g, '')}</span>
+          <span class="leg-detail">
+            {s.isVlm ? `${s.weightsGb.toFixed(1)}GB` : `${s.weightsGb.toFixed(1)}+${s.kvSegGb.toFixed(1)}GB`}
+          </span>
+        </span>
+      {/each}
       <span class="leg-item">
         <span class="dot free-dot"></span>
         <span class="leg-label">free</span>

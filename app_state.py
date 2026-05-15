@@ -26,6 +26,7 @@ stats: ServerStats = ServerStats()
 
 active_profile: str = "fast"
 profile_switching: bool = False
+startup_loading: bool = True   # cleared once startup warmup tasks finish
 profile_lock: asyncio.Lock = asyncio.Lock()
 
 # Set at startup by ov_server.py after the infergate router is initialised.
