@@ -78,9 +78,11 @@ export async function fetchVramProfiles() {
 }
 
 export async function fetchAvailableModels() {
-  const r = await fetch(`${BASE}/admin/load-model`)
-  if (!r.ok) throw new Error(`/admin/load-model ${r.status}`)
-  return r.json()
+  const r = await fetch(`${BASE}/v1/models`)
+  if (!r.ok) throw new Error(`/v1/models ${r.status}`)
+  const data = await r.json()
+  // Strip the Auto routing entry — the dropdown has its own AUTO option
+  return (data.data ?? []).filter(m => m.id !== 'Auto')
 }
 
 export async function loadModel(modelId) {

@@ -28,14 +28,21 @@
   let restarting = $state(false)
 
   // Model selection
-  let availableLlms = $state([])
+  let allModels    = $state([])
   let selectedModel = $state('auto')
 
+  const localModels  = $derived(allModels.filter(m => m.provider === 'loc'))
+  const remoteModels = $derived(allModels.filter(m => m.provider !== 'loc'))
+
+  function modelLabel(m) {
+    const name = m.id.replace(/-int4-ov|-int8-ov|-fp16-ov|-int4|-int8/g, '')
+    const type = m.model_type === 'vlm' ? 'VLM' : 'LLM'
+    return `${name} · ${type}`
+  }
+
   onMount(async () => {
-    try {
-      const data = await fetchAvailableModels()
-      availableLlms = data.llm ?? []
-    } catch { /* server not ready yet — leave list empty */ }
+    try { allModels = await fetchAvailableModels() }
+    catch { /* server not ready yet */ }
   })
 
   async function setProfile(name) {
@@ -56,6 +63,8 @@
 
   async function handleModelSelect() {
     if (busy || restarting) return
+    const model = allModels.find(m => m.id === selectedModel)
+    if (model && model.provider !== 'loc') return  // remote models can't be loaded locally
     onActionStart()
     busy = true
     await loadModel(selectedModel).catch(() => {})
@@ -128,9 +137,22 @@
       disabled={busy || restarting}
     >
       <option value="auto">AUTO</option>
-      {#each availableLlms as m}
-        <option value={m}>{m.replace(/-int4-ov|-int8-ov|-fp16-ov/g, '')}</option>
-      {/each}
+      {#if localModels.length}
+        <optgroup label="Local">
+          {#each localModels as m}
+            <option value={m.id}>{modelLabel(m)}</option>
+          {/each}
+        </optgroup>
+      {/if}
+      {#if remoteModels.length}
+        <optgroup label="Remote">
+          {#each remoteModels as m}
+            <option value={m.id} disabled>
+              {m.id.replace(/-int4-ov|-int8-ov|-fp16-ov/g, '')} · {m.provider?.toUpperCase()}
+            </option>
+          {/each}
+        </optgroup>
+      {/if}
     </select>
   </div>
 </section>

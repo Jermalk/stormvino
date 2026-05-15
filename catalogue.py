@@ -52,6 +52,7 @@ def _local_catalogue() -> list[dict]:
         entries.append({
             "id":             mid,
             "object":         "model",
+            "model_type":     "llm",
             "provider":       "loc",
             "tier":           tier_map.get(mid, "fast"),
             "context_length": None,
@@ -62,6 +63,7 @@ def _local_catalogue() -> list[dict]:
         entries.append({
             "id":             mid,
             "object":         "model",
+            "model_type":     "vlm",
             "provider":       "loc",
             "tier":           tier_map.get(mid, "fast"),
             "context_length": None,
@@ -98,6 +100,7 @@ async def _fetch_ovh_catalogue(spec: dict) -> list[dict]:
             entries.append({
                 "id":             mid,
                 "object":         "model",
+                "model_type":     "llm",
                 "provider":       "ovh",
                 "tier":           ovh_tier.get(mid, "best"),
                 "context_length": m.get("context_length") or m.get("context_window"),
