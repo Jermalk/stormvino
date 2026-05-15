@@ -512,11 +512,20 @@
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
 **Tests:** pass — 159/159
 
+### 2026-05-15 — Session 54 (e18deef)
+
+**Working on:** infergate gaps verification + VRAM profiler audit
+**Last commit:** e18deef — docs: session wrap — repo cleanup, security sweep, infergate gaps all fixed
+**Next action:** user-directed; remaining active plans: PLAN_future TTS, PLAN_platform pgvector RAG
+**Blocked on:** nothing
+**Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
+**Tests:** pass — 159/159
+
 ## NOW
 
-**Working on:** repo cleanup + infergate P0 gap verification
-**Last commit:** 9af8b27 — fix: remove personal paths and credentials from public files
-**Next action:** user-directed; remaining active plans: VRAM profiler Steps 5-8, PLAN_future TTS, PLAN_platform pgvector RAG
+**Working on:** VRAM profiler plan audit — all 8 steps confirmed complete
+**Last commit:** e18deef — docs: session wrap — repo cleanup, security sweep, infergate gaps all fixed
+**Next action:** user-directed; remaining active plans: PLAN_future (TTS/news/voice), PLAN_platform (pgvector RAG)
 **Blocked on:** nothing
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
 **Tests:** pass — 159/159
