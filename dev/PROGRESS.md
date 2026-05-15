@@ -577,9 +577,9 @@
 
 ## NOW
 
-**Working on:** Dead code cleanup + context hygiene
-**Last commit:** a2cb2c7 — docs: context hygiene — extract File Conventions, CLAUDE.md 290→258 lines
-**Next action:** user-directed; PLAN_future Phase 3 (news scraper) or PLAN_platform (pgvector RAG)
-**Blocked on:** nothing
+**Working on:** Plugin architecture PoC + VoiceButton SVP — complete
+**Last commit:** bb41e90 — feat: plugin architecture PoC — WebSearchPlugin via SearxNG
+**Next action:** `dev/PLAN_plugin_infergate.md` — Step 1 (extend BasePlugin with task_class_trigger)
+**Blocked on:** nothing — plan written, ready to execute next session
 **Open questions:** (1) InternVLAdapter tool calling deferred. (2) Embedding threshold 0.72 needs live tuning. (3) OVH routing override is in-memory only — resets on server restart.
 **Tests:** pass — 189/189
