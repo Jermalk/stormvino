@@ -106,7 +106,7 @@
       const ttsR = await fetch('/v1/audio/speech', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'tts', input: lastReply, voice: 'af_kore' })
+        body: JSON.stringify({ model: 'tts', input: lastReply })
       })
       if (!ttsR.ok) throw new Error(`TTS ${ttsR.status}`)
       const ttsBlob = await ttsR.blob()

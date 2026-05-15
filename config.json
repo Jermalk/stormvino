@@ -49,6 +49,7 @@
 
     "tts_model_dir":   "kokoro",
     "tts_voice":       "af_kore",
+    "tts_voice_pl":    "pl_PL-gosia-medium",
 
     "plugins": {
         "web_search": {

@@ -51,8 +51,20 @@ class TTSSpeechRequest(BaseModel):
     model: str = "piper"
     input: str
     voice: str = ""
+    language: str = "auto"   # "auto" | "en" | "pl" | …
     response_format: str = "wav"
     speed: float = 1.0
+
+
+# Polish diacritics that cannot appear in plain English text.
+_PL_RE = re.compile(r"[ąęóśźżćńłĄĘÓŚŹŻĆŃŁ]")
+
+
+def _auto_voice(text: str, cfg: dict) -> str:
+    """Return the best TTS voice for *text* based on diacritic detection."""
+    if _PL_RE.search(text):
+        return cfg.get("tts_voice_pl", "pl_PL-gosia-medium")
+    return cfg.get("tts_voice", "af_kore")
 
 
 @media_router.post("/v1/images/generations")
@@ -137,7 +149,14 @@ async def audio_transcriptions(
 
 @media_router.post("/v1/audio/speech")
 async def audio_speech(req: TTSSpeechRequest):
-    voice_name = req.voice or _cfg.get("tts_voice", "af_kore")
+    if req.voice:
+        voice_name = req.voice                        # explicit — honour it
+    elif req.language == "auto":
+        voice_name = _auto_voice(req.input, _cfg)     # detect from text
+    elif req.language == "pl":
+        voice_name = _cfg.get("tts_voice_pl", "pl_PL-gosia-medium")
+    else:
+        voice_name = _cfg.get("tts_voice", "af_kore")
     if _PIPER_VOICE_RE.match(voice_name):
         model_dir = str(Path(MODELS_DIR) / "piper")
     else:
