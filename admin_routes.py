@@ -56,6 +56,10 @@ class ScopeRequest(BaseModel):
     scope: str
 
 
+class LoadModelRequest(BaseModel):
+    model_id: str  # "auto" re-applies active profile; any AVAILABLE_MODELS key loads that LLM
+
+
 # ---------------------------------------------------------------------------
 # Profile switching — _apply_profile lives here to avoid circular imports
 # ---------------------------------------------------------------------------
@@ -328,6 +332,35 @@ async def set_scope(req: ScopeRequest) -> JSONResponse:
     _cfg["provider_scope"] = req.scope
     catalogue._catalogue_cache.clear()
     return JSONResponse(status_code=200, content={"scope": req.scope})
+
+
+# ---------------------------------------------------------------------------
+# Manual model loading
+# ---------------------------------------------------------------------------
+async def _do_manual_load(model_id: str) -> None:
+    """Load a specific LLM; evict VLMs as last resort if all LLMs evicted and still OOM."""
+    try:
+        await model_manager._warm_model(model_id)
+    except HTTPException:
+        log.warning(f"Manual load {model_id}: LLM eviction insufficient — evicting VLMs")
+        await model_manager.evict_all_vlms()
+        await model_manager._warm_model(model_id)
+
+
+@admin_router.get("/admin/load-model")
+async def get_available_llm_models() -> dict:
+    return {"llm": list(AVAILABLE_MODELS.keys())}
+
+
+@admin_router.post("/admin/load-model")
+async def manual_load_model(req: LoadModelRequest) -> JSONResponse:
+    if req.model_id == "auto":
+        asyncio.create_task(_apply_profile(app_state.active_profile))
+        return JSONResponse(status_code=200, content={"status": "ok", "action": "applying_profile"})
+    if req.model_id not in AVAILABLE_MODELS:
+        raise HTTPException(status_code=404, detail=f"Unknown LLM '{req.model_id}'")
+    asyncio.create_task(_do_manual_load(req.model_id))
+    return JSONResponse(status_code=200, content={"status": "ok", "model_id": req.model_id})
 
 
 @admin_router.post("/maintenance/restart")

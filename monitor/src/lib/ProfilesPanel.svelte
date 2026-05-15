@@ -1,5 +1,6 @@
 <script>
-  import { switchProfile, switchScope } from './api.js'
+  import { onMount } from 'svelte'
+  import { switchProfile, switchScope, fetchAvailableModels, loadModel } from './api.js'
 
   let { health, onActionStart } = $props()
 
@@ -23,8 +24,19 @@
     return n >= 1000 ? `${Math.round(n / 1000)}K` : `${n}`
   }
 
-  let busy        = $state(false)
-  let restarting  = $state(false)
+  let busy       = $state(false)
+  let restarting = $state(false)
+
+  // Model selection
+  let availableLlms = $state([])
+  let selectedModel = $state('auto')
+
+  onMount(async () => {
+    try {
+      const data = await fetchAvailableModels()
+      availableLlms = data.llm ?? []
+    } catch { /* server not ready yet — leave list empty */ }
+  })
 
   async function setProfile(name) {
     if (busy || restarting) return
@@ -39,6 +51,14 @@
     busy = true
     const next = SCOPES[(SCOPES.indexOf(scope) + 1) % SCOPES.length]
     await switchScope(next).catch(() => {})
+    busy = false
+  }
+
+  async function handleModelSelect() {
+    if (busy || restarting) return
+    onActionStart()
+    busy = true
+    await loadModel(selectedModel).catch(() => {})
     busy = false
   }
 
@@ -98,6 +118,21 @@
       <span class="restart-icon">↺</span><span class="restart-text">{restarting ? 'restarting…' : 'restart'}</span>
     </button>
   </div>
+
+  <div class="model-row">
+    <span class="slabel">Model</span>
+    <select
+      class="model-sel"
+      bind:value={selectedModel}
+      onchange={handleModelSelect}
+      disabled={busy || restarting}
+    >
+      <option value="auto">AUTO</option>
+      {#each availableLlms as m}
+        <option value={m}>{m.replace(/-int4-ov|-int8-ov|-fp16-ov/g, '')}</option>
+      {/each}
+    </select>
+  </div>
 </section>
 
 <style>
@@ -147,4 +182,17 @@
   .restart-text { opacity: .45; }
   .restart-btn.active .restart-icon { color: var(--yellow); }
   .restart-btn.active .restart-text { opacity: 1; color: var(--yellow); }
+
+  .model-row {
+    display: flex; align-items: center; gap: .4rem; margin-top: .5rem;
+  }
+  .model-sel {
+    flex: 1;
+    background: var(--card); border: 1px solid #ffffff15;
+    border-radius: 4px; padding: .3rem .4rem;
+    font-size: .82rem; color: inherit; cursor: pointer;
+    appearance: auto;
+  }
+  .model-sel:hover:not(:disabled) { border-color: var(--blue); }
+  .model-sel:disabled { opacity: .4; cursor: not-allowed; }
 </style>

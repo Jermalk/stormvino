@@ -76,3 +76,17 @@ export async function fetchVramProfiles() {
   if (!r.ok) throw new Error(`/monitor/api/vram-profiles ${r.status}`)
   return r.json()
 }
+
+export async function fetchAvailableModels() {
+  const r = await fetch(`${BASE}/admin/load-model`)
+  if (!r.ok) throw new Error(`/admin/load-model ${r.status}`)
+  return r.json()
+}
+
+export async function loadModel(modelId) {
+  await fetch(`${BASE}/admin/load-model`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model_id: modelId }),
+  })
+}
