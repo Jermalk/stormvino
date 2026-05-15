@@ -257,12 +257,13 @@ def chat_stream(messages: list[dict], model: str, server: str) -> str:
 # ---------------------------------------------------------------------------
 
 def synthesize(text: str, cfg: dict) -> np.ndarray | None:
-    lang  = cfg.get("tts_lang", "en")
-    voice = cfg.get("tts_voice", "af_kore")
+    # "pl" (--lang pl) → tell server to force Polish voice.
+    # Anything else  → "auto": server detects language from diacritics in text.
+    send_lang = "pl" if cfg.get("tts_lang") == "pl" else "auto"
     try:
         r = httpx.post(
             f"{cfg['server']}/v1/audio/speech",
-            json={"model": "tts", "input": text, "voice": voice, "language": lang},
+            json={"model": "tts", "input": text, "language": send_lang},
             timeout=60.0,
         )
         r.raise_for_status()

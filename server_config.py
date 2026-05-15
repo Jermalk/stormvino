@@ -120,7 +120,11 @@ _KNOWN_CONFIG_KEYS: frozenset[str] = frozenset({
     # stt
     "stt_model", "stt_device",
     # tts
-    "tts_model_dir", "tts_voice",
+    "tts_model_dir", "tts_voice", "tts_voice_pl",
+    # news
+    "news",
+    # plugins
+    "plugins",
     # safety
     "blocked_models",
     # timing
