@@ -17,6 +17,7 @@ That is a strong example of 1+1=3 (or even 5).
 Some of you will call it "vibe coding" — if you think so,
 I encourage you to try and point me to your repo.
 "Work your butts off" — like A. Schwarzenegger used to say.
+
 ---
 
 ## Origin
