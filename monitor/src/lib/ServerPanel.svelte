@@ -66,6 +66,14 @@
           <td>{health.stt_model_loaded ? '✓' : '—'}</td>
         </tr>
         <tr>
+          <td>TTS</td>
+          <td>
+            {#if health.tts_voice_loaded}
+              <span title={health.tts_voice_id ?? ''}>✓ <span class="dim">{(health.tts_voice_id ?? '').replace('kokoro:', '')}</span></span>
+            {:else}—{/if}
+          </td>
+        </tr>
+        <tr>
           <td>Scope</td>
           <td class:hl={scope !== 'local'}>{scope}</td>
         </tr>

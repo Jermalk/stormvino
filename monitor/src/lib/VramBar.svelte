@@ -42,13 +42,13 @@
   // Canonical loading flag.
   // overrideLoading is set immediately by user actions (profile switch, restart)
   // so the animation fires before the server has a chance to update its state.
-  // The server flags and loadingGb heuristic cover all other cases.
+  // NOTE: loadingGb heuristic intentionally omitted — STT/TTS/embedding occupy ~3 GB
+  // of untracked VRAM and would permanently trigger the animation.
   const isLoading = $derived(
     overrideLoading ||
     !!(health?.loading_model_id) ||
     !!(health?.profile_switching) ||
-    !!(health?.startup_loading) ||
-    loadingGb > 1.2
+    !!(health?.startup_loading)
   )
 
   const usedGb = $derived(liveServerGb || allocatedSum)
