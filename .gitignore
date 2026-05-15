@@ -15,6 +15,7 @@ ov_cache/
 
 # personal tool config
 .aider.conf.yml
+.claude/
 
 # PND session logs (internal debug/test session artifacts)
 dev/autotest/*.md
